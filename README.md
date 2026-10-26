@@ -2,7 +2,7 @@
 
 A local AI workspace for downloading models, running agents, and building visual pipelines on your own machine. Chat with a resident guide, choose specialist models, and inspect each step as a workflow runs.
 
-This is a desktop alpha. Models can be downloaded into TIM Studio's local data folder or referenced in place from an existing TIM library. Once the required models and engines are installed, inference runs locally.
+TIM Studio is a desktop alpha for **Windows, macOS, and Linux**. Models can be downloaded into its local data folder or referenced in place from an existing TIM library. Once the required models and engines are installed, inference runs locally.
 
 ## Screenshots
 
@@ -24,22 +24,36 @@ Interface previews use example data. The completed pipeline shows saved results 
 
 ![Completed local pipeline showing model loading, code generation, delegated review, and model unloading](docs/screenshots/pipeline-run.webp)
 
-## Run on Windows now
+## Run on Windows, macOS, and Linux
 
-Open `Start-Windows.bat`, or launch `release/win-unpacked/TIM Studio.exe`.
+| Platform | Launcher from this repository | Packaged app |
+| --- | --- | --- |
+| Windows | Open [Start-Windows.bat](Start-Windows.bat). | Extract the Windows ZIP and open `TIM Studio.exe`. Keep the entire extracted folder together. |
+| macOS — Apple Silicon or Intel | Open [Start-Mac.command](Start-Mac.command). | Extract the matching arm64 or x64 ZIP and open `TIM Studio.app`. |
+| Linux x64 | Run `./Start-Linux.sh`, or `sh Start-Linux.sh` if executable permissions were not retained. | Mark the AppImage executable and open it. An unpacked build can also run `release/linux-unpacked/tim-studio`. |
 
-The packaged app includes its JavaScript runtime and interface. It does not need npm or Python. Keep the entire `win-unpacked` folder together. A fresh setup downloads a lightweight guide and a chat engine when needed. Existing `Coding-Models` and `Portable-Local-Studio` folders remain optional sources for models and media engines; Settings can point to a different library root.
+The launchers prefer a matching local packaged build when present. To run from a fresh source checkout on any platform, install **Node.js 24 or newer**, then run these commands in the project folder:
 
-The UI is also available with `npm start` after a build, at `http://127.0.0.1:4317`.
+```sh
+npm ci --include=dev
+npm run setup:desktop
+npm run desktop
+```
+
+After setup, use the platform launcher above. The Mac launcher can also install missing development dependencies automatically; Windows and Linux launchers expect the source environment to be prepared first.
+
+The packaged app includes its JavaScript runtime and interface and does not need npm or Python to launch. A fresh setup downloads a lightweight guide and chat engine when needed. Existing `Coding-Models` and `Portable-Local-Studio` folders remain optional sources for models and media engines; Settings can point to a different library root.
+
+Browser mode works on all three platforms: run `npm run build`, then `npm start`, and open [http://127.0.0.1:4317](http://127.0.0.1:4317).
 
 ## Platform targets and actual validation
 
 | Platform | Desktop packaging | Existing TIM engine support | Validation here |
 | --- | --- | --- | --- |
 | Windows 10/11 x64 | Unpacked app and ZIP | CPU/Vulkan chat, CUDA/Vulkan/CPU diffusion, Vulkan upscale, CPU Whisper | Native launch, chat, image, upscale, and spoken-audio transcription passed |
-| macOS Apple Silicon | arm64 app ZIP | Existing arm64/Metal engines; the TIM package documents macOS 26+ for its chat/video binaries | Development app, guide, coding specialist, concurrent residency and a five-step local pipeline passed on October 26, 2026; packaged app and media inference not tested |
+| macOS Apple Silicon | arm64 app ZIP | Existing arm64/Metal engines; the TIM package documents macOS 26+ for its chat/video binaries | Development app, guide, coding specialist, concurrent residency and a five-step local pipeline passed locally; ZIP packaging and native desktop startup passed in CI on October 26, 2026; packaged-app first-run setup and media inference not tested |
 | macOS Intel | x64 app ZIP | Requires separate x64 runtime packs; the supplied TIM Mac engines are arm64 | Build workflow configured; inference not tested |
-| Linux x64 | AppImage | Existing CPU/Vulkan engines; TIM documents Ubuntu 24.04-compatible systems with glibc 2.38+ and required GPU/OpenMP libraries | Build workflow configured; native execution not tested |
+| Linux x64 | AppImage | Existing CPU/Vulkan engines; TIM documents Ubuntu 24.04-compatible systems with glibc 2.38+ and required GPU/OpenMP libraries | AppImage packaging and native desktop startup passed in CI on October 26, 2026; model inference not tested on Linux |
 
 Native packages must be validated on their own operating systems. `.github/workflows/desktop.yml` runs tests, native packaging, and desktop startup checks on all four architecture targets. It uploads build artifacts and disables release publishing. See [GitHub Actions](https://github.com/The-inside-man/smooth-operator/actions) for current results; the local validation above does not establish packaged-app inference compatibility on every platform.
 
@@ -183,7 +197,7 @@ On a fresh Mac checkout, open `Start-Mac.command` with Node.js 24+ installed. If
 - The lightweight guide receives a task-relevant catalog shelf for recommendations. Direct requests such as “use the coding specialist” use a concise dispatch prompt and require an actual call to the matching registered function on the first step; a missing call fails visibly. Specialists also receive bounded original source context. These checks do not establish universal routing reliability.
 - The pipeline browser check passed graph editing, connections, import/export, uploads, live output, pause/resume/cancel, interruption history, and responsive layouts. Unsaved work survives switching to Chat; selecting a pipeline queue job opens that exact run. The desktop startup and isolated preload check also passed on Mac.
 - The installed Qwen3 0.6B guide answered the reported "guild a pipeline" question with the actual builder controls, explained the complete model download/load workflow, and accurately stated its lack of direct interface control. This real check used isolated conversations, no model downloads, the same resident guide process, and no specialist execution. It validates these examples rather than guaranteeing every answer from a small model.
-- Complete packaged-app first-run setup and native Windows/Linux execution of this feature remain pending. The Windows evidence below predates this feature and remains evidence for the earlier adapters only.
+- Complete packaged-app first-run setup and real-model validation of the new catalog/guide features on Windows and Linux remain pending. Native startup and packaging results are reported separately above. The Windows inference evidence below predates these features and remains evidence for the earlier adapters only.
 
 ## Validation performed on October 22, 2026
 
