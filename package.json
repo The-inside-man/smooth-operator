@@ -1,0 +1,88 @@
+{
+  "name": "tim-studio",
+  "version": "0.1.0",
+  "description": "A portable, offline multimedia AI workbench",
+  "author": "TIM Studio",
+  "private": true,
+  "type": "module",
+  "main": "desktop/main.cjs",
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "build": "tsc --noEmit && vite build",
+    "start": "node server/index.mjs",
+    "desktop": "npm run build && electron .",
+    "setup:desktop": "node node_modules/electron/install.js",
+    "test": "node --test tests/*.test.mjs",
+    "test:ui": "node scripts/check-ui.mjs",
+    "pack": "npm run build && electron-builder --dir",
+    "dist": "npm run build && electron-builder"
+  },
+  "dependencies": {
+    "@fontsource/ibm-plex-mono": "^5.2.7",
+    "@fontsource/press-start-2p": "^5.3.0",
+    "@fontsource/space-grotesk": "^5.2.10",
+    "lucide-react": "^0.468.0",
+    "react": "19.2.0",
+    "react-dom": "19.2.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-react": "^5.1.0",
+    "electron": "45.0.0",
+    "electron-builder": "26.15.3",
+    "playwright": "^1.56.1",
+    "typescript": "^5.9.3",
+    "vite": "^7.2.0"
+  },
+  "build": {
+    "appId": "studio.tim.desktop",
+    "productName": "TIM Studio",
+    "icon": "build/icon.png",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "desktop/**/*",
+      "server/**/*",
+      "package.json"
+    ],
+    "asar": true,
+    "npmRebuild": false,
+    "win": {
+      "target": [
+        {
+          "target": "zip",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "zip",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ],
+      "category": "public.app-category.graphics-design"
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "category": "Graphics"
+    },
+    "artifactName": "TIM-Studio-${version}-${os}-${arch}.${ext}"
+  }
+}

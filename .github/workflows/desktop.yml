@@ -1,0 +1,45 @@
+name: Desktop validation and packages
+on: [push, pull_request, workflow_dispatch]
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: win-x64
+            args: --win --x64
+          - os: macos-14
+            target: mac-arm64
+            args: --mac --arm64
+          - os: macos-15-intel
+            target: mac-x64
+            args: --mac --x64
+          - os: ubuntu-24.04
+            target: linux-x64
+            args: --linux --x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run setup:desktop
+      - run: npm test
+      - run: npm run dist -- ${{ matrix.args }}
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - name: Native desktop startup (Windows and Mac)
+        if: runner.os != 'Linux'
+        run: node scripts/check-desktop.mjs --ui-only
+      - name: Native desktop startup (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a node scripts/check-desktop.mjs --ui-only
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TIM-Studio-${{ matrix.target }}
+          path: |
+            release/*.zip
+            release/*.AppImage
