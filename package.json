@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "description": "A portable, offline multimedia AI workbench",
   "author": "TIM Studio",
+  "license": "MIT",
   "private": true,
   "type": "module",
   "main": "desktop/main.cjs",
@@ -14,8 +15,13 @@
     "setup:desktop": "node node_modules/electron/install.js",
     "test": "node --test tests/*.test.mjs",
     "test:ui": "node scripts/check-ui.mjs",
+    "test:catalog-ui": "npm run build && node scripts/check-model-library.mjs",
+    "smoke:guide": "node scripts/smoke-guide.mjs",
+    "smoke:app-help": "node scripts/smoke-app-help.mjs",
+    "test:pipelines-ui": "npm run build && node scripts/check-pipelines-ui.mjs",
+    "smoke:pipelines": "node scripts/smoke-pipelines.mjs",
     "pack": "npm run build && electron-builder --dir",
-    "dist": "npm run build && electron-builder"
+    "dist": "npm run build && electron-builder --publish never"
   },
   "dependencies": {
     "@fontsource/ibm-plex-mono": "^5.2.7",
@@ -46,6 +52,7 @@
       "dist/**/*",
       "desktop/**/*",
       "server/**/*",
+      "LICENSE",
       "package.json"
     ],
     "asar": true,

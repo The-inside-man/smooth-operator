@@ -16,6 +16,7 @@ async function fixture(t) {
   studio.config = { mainAgentModelId: 'main', agentMaxSteps: 4, agentTimeoutSeconds: 5, backend: 'cpu', context: 4096, maxTokens: 100, temperature: .1, systemPrompt: 'test' };
   studio.registry = { models: ['main', 'coder', 'image', 'upscale', 'transcribe'].map(id => ({ id, name: id, kind: ['main', 'coder'].includes(id) ? 'chat' : id, available: true })), runtimes: Object.fromEntries(['chat', 'image', 'upscale', 'transcribe'].map(k => [k, { backend: 'cpu' }])) };
   studio.llama = { load: async model => { loads.push(model.id); }, unload: async () => { loads.push('unload'); }, generate: async (_m, _s, signal, token) => { signal.throwIfAborted(); token('specialist text'); }, turn: async messages => { turns.push(structuredClone(messages)); return { content: 'Done' }; } };
+  studio.orchestrator = studio.llama;
   studio.generateMedia = async args => { media.push(args); return { text: 'Artifact created', artifact: { filename: `${args.id}.png`, kind: 'image', size: 1 } }; };
   t.after(async () => { await studio.close(); await fs.rm(dir, { recursive: true, force: true }); });
   return { studio, dir, loads, turns, media };

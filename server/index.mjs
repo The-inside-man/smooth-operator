@@ -32,7 +32,7 @@ async function fileResponse(req, res, filename, download = false) {
   const stream = createReadStream(filename, { start, end });
   stream.on('error', () => res.destroy()); res.on('close', () => stream.destroy()); stream.pipe(res);
 }
-export async function startServer({ port = 4317, dataDir = process.env.TIM_DATA_DIR || path.join(root, 'data'), staticDir = path.join(root, 'dist') } = {}) {
+export async function startServer({ port = 4317, dataDir = process.env.TIM_DATA_DIR || path.join(root, 'data'), staticDir = path.join(root, 'dist'), autoSetup = process.env.TIM_AUTO_SETUP !== '0' } = {}) {
   const studio = new Studio(dataDir); studio.on('error', error => console.error('Studio:', error.message)); await studio.init();
   const clients = new Set();
   const server = http.createServer(async (req, res) => {
@@ -59,7 +59,19 @@ export async function startServer({ port = 4317, dataDir = process.env.TIM_DATA_
       if (url.pathname === '/api/cancel' && req.method === 'POST') { await studio.cancel((await body(req)).id); return json(res, { ok: true }); }
       if (url.pathname === '/api/settings' && req.method === 'POST') { await studio.updateSettings(await body(req)); return json(res, { ok: true }); }
       if (url.pathname === '/api/rescan' && req.method === 'POST') { await studio.rescan(); return json(res, { ok: true }); }
-      if (url.pathname === '/api/unload' && req.method === 'POST') { if (studio.active) throw new Error('Finish or cancel the active job first.'); await studio.llama.unload(); studio.changed(); return json(res, { ok: true }); }
+      if (url.pathname === '/api/setup' && req.method === 'POST') { await studio.setupGuide(); return json(res, { ok: true }); }
+      if (url.pathname === '/api/models/download' && req.method === 'POST') return json(res, await studio.downloads.start((await body(req)).id));
+      if (url.pathname === '/api/models/cancel' && req.method === 'POST') return json(res, await studio.downloads.cancel((await body(req)).id));
+      if (url.pathname === '/api/models/load' && req.method === 'POST') { await studio.loadModel((await body(req)).id); return json(res, { ok: true }); }
+      if (url.pathname === '/api/models/unload' && req.method === 'POST') { await studio.unloadModel((await body(req)).id); return json(res, { ok: true }); }
+      if (url.pathname === '/api/unload' && req.method === 'POST') { await studio.unloadModel(); return json(res, { ok: true }); }
+      if (url.pathname === '/api/pipelines/save' && req.method === 'POST') return json(res, await studio.pipelines.save((await body(req)).pipeline));
+      if (url.pathname === '/api/pipelines/validate' && req.method === 'POST') return json(res, { valid: true, pipeline: studio.validatePipeline((await body(req)).pipeline) });
+      if (url.pathname === '/api/pipelines/delete' && req.method === 'POST') { await studio.pipelines.remove((await body(req)).id); return json(res, { ok: true }); }
+      if (url.pathname === '/api/pipelines/run' && req.method === 'POST') return json(res, await studio.runPipeline(await body(req)));
+      if (url.pathname === '/api/pipelines/pause' && req.method === 'POST') return json(res, await studio.pausePipeline((await body(req)).id));
+      if (url.pathname === '/api/pipelines/resume' && req.method === 'POST') return json(res, await studio.resumePipeline((await body(req)).id));
+      if (url.pathname === '/api/pipelines/cancel' && req.method === 'POST') return json(res, await studio.cancelPipeline((await body(req)).id));
       if (url.pathname === '/api/upload' && req.method === 'POST') {
         const input = await body(req);
         const ext = path.extname(String(input.name)).toLowerCase();
@@ -91,6 +103,7 @@ export async function startServer({ port = 4317, dataDir = process.env.TIM_DATA_
   });
   studio.on('state', state => { const payload = `data: ${JSON.stringify(state)}\n\n`; for (const client of clients) client.write(payload); });
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, '127.0.0.1', resolve); });
+  if (autoSetup) queueMicrotask(() => studio.startDefaultGuide().catch(error => { studio.guideState = { status: 'error', error: error.message }; studio.changed(); }));
   return { studio, url: `http://127.0.0.1:${server.address().port}`, close: async () => { for (const client of clients) client.end(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); await studio.close(); } };
 }
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

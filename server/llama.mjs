@@ -10,20 +10,24 @@ export async function freePort() {
 }
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 export class Llama {
-  constructor(workDir, spawnProcess = spawn) { this.workDir = workDir; this.spawnProcess = spawnProcess; this.toolCalling = false; this.child = null; this.modelId = null; this.tail = ''; }
+  constructor(workDir, spawnProcess = spawn) { this.workDir = workDir; this.spawnProcess = spawnProcess; this.toolCalling = false; this.child = null; this.modelId = null; this.runtimeKey = null; this.tail = ''; }
   async unload() {
     const child = this.child;
-    this.child = null; this.modelId = null;
+    this.child = null; this.modelId = null; this.runtimeKey = null;
     if (child && child.exitCode === null && child.signalCode === null) {
       await new Promise(resolve => { child.once('close', resolve); child.kill('SIGKILL'); });
     }
   }
   async load(model, runtime, signal, update, context, toolCalling = false) {
-    if (this.child && this.modelId === model.id && this.toolCalling === toolCalling) return;
+    const threads = Number.isInteger(runtime.threads) && runtime.threads > 0 ? runtime.threads : undefined;
+    const runtimeKey = JSON.stringify({ binary: runtime.binary, backend: runtime.backend, context, threads, toolCalling });
+    if (this.child && this.modelId === model.id && this.runtimeKey === runtimeKey) return;
     await this.unload();
     if (signal.aborted) throw new Error('Cancelled');
     const port = await freePort();
     const args = ['-m', model.file, '--host', '127.0.0.1', '--port', String(port), '-c', String(context), '-ngl', runtime.backend === 'cpu' ? '0' : '99', '--parallel', '1'];
+    if (runtime.backend === 'cpu' && toolCalling) args.push('--device', 'none', '--no-kv-offload', '--batch-size', '128', '--ubatch-size', '128');
+    if (threads) args.push('--threads', String(threads));
     if (toolCalling) args.push('--jinja');
     this.toolCalling = toolCalling;
     this.tail = '';
@@ -31,7 +35,7 @@ export class Llama {
     this.child = child;
     let failure;
     child.on('error', e => { failure = e; });
-    child.on('close', code => { failure ||= new Error(`Chat engine exited (${code}). ${this.tail.slice(-1800)}`); if (this.child === child) { this.child = null; this.modelId = null; } });
+    child.on('close', code => { failure ||= new Error(`Chat engine exited (${code}). ${this.tail.slice(-1800)}`); if (this.child === child) { this.child = null; this.modelId = null; this.runtimeKey = null; } });
     const log = chunk => { this.tail = (this.tail + chunk.toString()).slice(-6000); };
     child.stdout.on('data', log); child.stderr.on('data', log);
     const abort = () => child.kill('SIGKILL');
@@ -41,30 +45,40 @@ export class Llama {
       for (let i = 0; i < 360; i++) {
         if (signal.aborted) throw new Error('Cancelled');
         if (failure) throw failure;
-        try { const response = await fetch(`http://127.0.0.1:${port}/health`, { signal: AbortSignal.timeout(500) }); if (response.ok) { this.port = port; this.modelId = model.id; return; } } catch {}
+        try { const response = await fetch(`http://127.0.0.1:${port}/health`, { signal: AbortSignal.timeout(500) }); if (response.ok) { this.port = port; this.modelId = model.id; this.runtimeKey = runtimeKey; return; } } catch {}
         await delay(500);
       }
       throw new Error(`Model loading timed out. ${this.tail.slice(-1200)}`);
     } catch (error) { await this.unload(); throw error; }
     finally { signal.removeEventListener('abort', abort); }
   }
-  async turn(messages, settings, signal, tools) {
+  async turn(messages, settings, signal, tools = []) {
+    const forcedName = tools.length && settings.toolChoice?.type === 'function' ? settings.toolChoice.function?.name : undefined;
+    const requiresTool = Boolean(tools.length && (forcedName || settings.toolChoice === 'required'));
+    if (forcedName && !tools.some(tool => tool.function?.name === forcedName)) throw new Error('The requested specialist is not registered.');
+    // Some local templates treat named tool_choice as advisory. Offering one
+    // function with required selection preserves the explicit request reliably.
+    const offeredTools = forcedName ? tools.filter(tool => tool.function?.name === forcedName) : tools;
     const response = await fetch(`http://127.0.0.1:${this.port}/v1/chat/completions`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, signal,
       body: JSON.stringify({ messages, stream: false, temperature: settings.temperature, max_tokens: settings.maxTokens,
-        ...(tools.length ? { tools, tool_choice: 'auto', parallel_tool_calls: false } : { tool_choice: 'none' }) })
+        ...(settings.enableThinking === false ? { chat_template_kwargs: { enable_thinking: false } } : {}),
+        ...(offeredTools.length ? { tools: offeredTools, tool_choice: forcedName ? 'required' : settings.toolChoice || 'auto', parallel_tool_calls: false } : { tool_choice: 'none' }) })
     });
     if (!response.ok) throw new Error(`Main agent request failed (${response.status}). Check local engine and model tool-call support: ${(await response.text()).slice(0, 500)}`);
     const data = await response.json();
     const choice = data.choices?.[0];
     if (choice?.finish_reason === 'length') throw new Error('Main agent response was truncated. Increase response tokens or shorten the request.');
     if (!choice?.message || data.error) throw new Error('Main agent returned an invalid response.');
+    if (requiresTool && (!Array.isArray(choice.message.tool_calls) || !choice.message.tool_calls.length)) throw new Error('The local model did not call the requested specialist. Check engine/model tool-call compatibility or choose another agent model.');
+    if (forcedName && choice.message.tool_calls.some(call => call.function?.name !== forcedName)) throw new Error('The local model selected a different specialist than requested.');
     return choice.message;
   }
   async generate(messages, settings, signal, onToken) {
     const response = await fetch(`http://127.0.0.1:${this.port}/v1/chat/completions`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, signal,
-      body: JSON.stringify({ messages, stream: true, temperature: settings.temperature, max_tokens: settings.maxTokens })
+      body: JSON.stringify({ messages, stream: true, temperature: settings.temperature, max_tokens: settings.maxTokens,
+        ...(settings.enableThinking === false ? { chat_template_kwargs: { enable_thinking: false } } : {}) })
     });
     if (!response.ok) throw new Error(`Chat engine: ${(await response.text()).slice(0, 1500)}`);
     let pending = '';

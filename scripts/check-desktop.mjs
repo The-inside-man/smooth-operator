@@ -3,7 +3,7 @@ import path from 'node:path';
 import fs from 'node:fs/promises';
 const packaged = process.argv.includes('--packaged');
 const uiOnly = process.argv.includes('--ui-only');
-const desktop = await electron.launch({ ...(packaged ? { executablePath: path.resolve('release/win-unpacked/TIM Studio.exe') } : { args: ['.'] }), env: { ...process.env, TIM_HEADLESS: '1', TIM_DATA_DIR: path.resolve('artifacts/desktop-smoke') } });
+const desktop = await electron.launch({ ...(packaged ? { executablePath: path.resolve('release/win-unpacked/TIM Studio.exe') } : { args: ['.'] }), env: { ...process.env, TIM_HEADLESS: '1', TIM_AUTO_SETUP: '0', TIM_DATA_DIR: path.resolve('artifacts/desktop-smoke') } });
 try {
   const page = await desktop.firstWindow();
   const errors = []; page.on('pageerror', e => errors.push(e.message));
@@ -19,7 +19,7 @@ try {
   }
   await fs.mkdir('artifacts/ui', { recursive: true });
   await page.screenshot({ path: 'artifacts/ui/desktop-chat.png' });
-  await page.getByRole('button', { name: /New session/ }).click();
+  await page.locator('button.new-session').click();
   await page.screenshot({ path: 'artifacts/ui/desktop-workspace.png' });
   if (errors.length) throw new Error(errors.join('\n'));
   console.log(JSON.stringify({ packaged, nativeLaunch: true, streamingChat: !uiOnly, preloadIsolation: isolation, consoleErrors: errors }));

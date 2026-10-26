@@ -9,7 +9,7 @@ Studio.prototype.telemetry = async function () {};
 import { startServer } from '../server/index.mjs';
 test('HTTP API serves output ranges and rejects cross-origin mutations and traversal', async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'tim-api-'));
-  const service = await startServer({ port: 0, dataDir: dir });
+  const service = await startServer({ port: 0, dataDir: dir, autoSetup: false });
   try {
     let r = await fetch(service.url + '/api/sessions', { method: 'POST' }); assert.equal(r.status, 403);
     r = await fetch(service.url + '/api/sessions', { method: 'POST', headers: { 'x-tim-request': '1', origin: 'https://unrelated.example' } }); assert.equal(r.status, 403);
