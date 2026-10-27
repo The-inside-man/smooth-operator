@@ -18,7 +18,7 @@ test('reference editing requires an image before launching an engine and uses re
   const args = mediaArgs('image', editing, settings, '/reference with spaces.png', '/output.png');
   assert.equal(arg(args, '-r'), '/reference with spaces.png');
   assert.ok(!args.includes('-i'));
-  assert.equal(arg(args, '--llm_vision'), '/models/vision.gguf');
+  assert.equal(arg(args, '--llm_vision'), path.join('/models', 'vision.gguf'));
   assert.equal(arg(args, '--flow-shift'), '3');
   assert.equal(arg(args, '--model-args'), 'qwen_image_zero_cond_t=true');
   assert.equal(arg(args, '--steps'), '40');

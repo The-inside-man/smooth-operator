@@ -13,7 +13,7 @@
     "start": "node server/index.mjs",
     "desktop": "npm run build && electron .",
     "setup:desktop": "node node_modules/electron/install.js",
-    "test": "node --test tests/*.test.mjs",
+    "test": "node --test --test-timeout=120000 tests/*.test.mjs",
     "test:ui": "node scripts/check-ui.mjs",
     "test:catalog-ui": "npm run build && node scripts/check-model-library.mjs",
     "test:defaults-ui": "npm run build && node scripts/check-model-defaults.mjs",

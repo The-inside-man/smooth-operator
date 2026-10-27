@@ -5,13 +5,25 @@ import os from 'node:os';
 import path from 'node:path';
 import { Studio } from '../server/studio.mjs';
 import { startServer } from '../server/index.mjs';
+import { MemoryMonitor } from '../server/memory.mjs';
 
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
+const GiB = 2 ** 30;
 const node = (id, options = {}) => ({ id, name: id, type: 'chat', modelId: 'local', prompt: `Complete ${id}`, dependsOn: [], position: { x: 100, y: 200 }, settings: {}, memoryPolicy: 'auto', ...options });
 const definition = nodes => ({ schemaVersion: 1, name: 'Local pipeline', description: 'Queue integration test', nodes });
 async function until(predicate, label = 'state transition') {
   const deadline = Date.now() + 4000;
   while (!predicate()) { if (Date.now() >= deadline) throw new Error(`Timed out waiting for ${label}`); await new Promise(resolve => setTimeout(resolve, 5)); }
+}
+async function waitForStart(started, operation) {
+  let timer;
+  try {
+    await Promise.race([
+      started.promise,
+      operation.then(() => { throw new Error('The operation finished before the fixture stage started.'); }),
+      new Promise((_resolve, reject) => { timer = setTimeout(() => reject(new Error('Timed out waiting for the fixture stage to start.')), 2000); })
+    ]);
+  } finally { clearTimeout(timer); }
 }
 async function gate(signal, pending) {
   signal.throwIfAborted();
@@ -19,16 +31,26 @@ async function gate(signal, pending) {
   try { await Promise.race([pending, new Promise((_resolve, reject) => { abort = () => reject(signal.reason || new Error('Cancelled')); signal.addEventListener('abort', abort, { once: true }); })]); }
   finally { signal.removeEventListener('abort', abort); }
 }
-function configure(studio) {
+function configure(studio, t, budgetBytes = 8 * GiB) {
+  // Queue fixtures never load real models. Keep their admission conditions
+  // independent of the runner's current RAM and platform memory commands.
+  t.mock.method(os, 'totalmem', () => 16 * GiB);
+  const totalBytes = 16 * GiB, reserveBytes = Math.round(totalBytes * .1);
+  studio.memoryMonitor = new MemoryMonitor({
+    total: () => totalBytes,
+    free: () => budgetBytes + reserveBytes,
+    host: async () => ({ total: totalBytes, totalBytes, free: budgetBytes + reserveBytes, availableBytes: budgetBytes + reserveBytes, usedBytes: totalBytes - budgetBytes - reserveBytes, reserveBytes, modelBudgetBytes: budgetBytes, availableSource: 'os' }),
+    processes: async () => new Map()
+  });
   studio.config = { mainAgentModelId: 'local', systemPrompt: 'test', backend: 'cpu', context: 4096, maxTokens: 100, temperature: .1, agentMaxSteps: 4, agentTimeoutSeconds: 30 };
   studio.registry = { models: [{ id: 'local', name: 'Local fixture', kind: 'chat', available: true }], runtimes: { chat: { backend: 'cpu' } } };
   const engine = () => ({ modelId: null, async load(model) { this.modelId = model.id; }, async unload() { this.modelId = null; }, async generate(_messages, _settings, signal, onToken) { signal.throwIfAborted(); onToken('Manual response'); } });
   studio.llama = engine(); studio.orchestrator = engine();
   studio.rescan = async () => {}; studio.telemetry = async () => {};
 }
-async function fixture(t) {
+async function fixture(t, { budgetBytes = 8 * GiB } = {}) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'tim-pipeline-queue-'));
-  const studio = new Studio(directory), studios = [studio]; configure(studio);
+  const studio = new Studio(directory), studios = [studio]; configure(studio, t, budgetBytes);
   for (const name of ['uploads', 'outputs', 'work']) await fs.mkdir(path.join(directory, name));
   await studio.pipelines.init();
   t.after(async () => { for (const item of studios) await item.close(); await fs.rm(directory, { recursive: true, force: true }); });
@@ -46,7 +68,7 @@ test('pipeline steps and normal chat share one global inference queue without ov
   };
   studio.llama.generate = async (_messages, _settings, signal, token) => { signal.throwIfAborted(); active++; maxActive = Math.max(active, maxActive); events.push('chat'); token('Manual response'); active--; };
   const saved = await studio.pipelines.save(definition([node('a'), node('b', { dependsOn: ['a'] })]));
-  const run = await studio.runPipeline({ pipelineId: saved.id }); await started.promise;
+  const run = await studio.runPipeline({ pipelineId: saved.id }); await waitForStart(started, settled(studio, run.id));
   const manual = await studio.enqueue({ kind: 'chat', modelId: 'local', prompt: 'Manual task' });
   assert.equal(manual.status, 'queued'); assert.deepEqual(events, ['a:start']);
   release.resolve(); await settled(studio, manual.id);
@@ -60,12 +82,12 @@ test('queued pause remains effective while its persistence is pending and anothe
   const manualStarted = deferred(), manualRelease = deferred(), pauseApplied = deferred(), pauseRelease = deferred(); let steps = 0;
   studio.llama.generate = async (_messages, _settings, signal, token) => { manualStarted.resolve(); await gate(signal, manualRelease.promise); token('Done'); };
   studio.pipelines.executeStep = async () => { steps++; return { text: 'Done' }; };
-  const manual = await studio.enqueue({ kind: 'chat', modelId: 'local', prompt: 'First' }); await manualStarted.promise;
+  const manual = await studio.enqueue({ kind: 'chat', modelId: 'local', prompt: 'First' }); await waitForStart(manualStarted, settled(studio, manual.id));
   const saved = await studio.pipelines.save(definition([node('a')]));
   const run = await studio.runPipeline({ pipelineId: saved.id }); assert.equal(run.status, 'queued');
   const originalChanged = studio.pipelines.changed.bind(studio.pipelines);
   studio.pipelines.changed = async () => { if (run.status === 'paused') { pauseApplied.resolve(); await pauseRelease.promise; } await originalChanged(); };
-  const pausing = studio.pausePipeline(run.id); await pauseApplied.promise;
+  const pausing = studio.pausePipeline(run.id); await waitForStart(pauseApplied, pausing);
   assert.equal(studio.jobs.find(job => job.id === run.id).status, 'queued');
   manualRelease.resolve(); await settled(studio, manual.id);
   assert.equal(steps, 0); assert.equal(run.status, 'paused'); assert.equal(studio.active, null);
@@ -80,7 +102,7 @@ test('active pause finishes one step, then resume keeps completed outputs and th
   const started = deferred(), release = deferred(), calls = [];
   studio.pipelines.executeStep = async (step, context) => { calls.push(step.id); if (step.id === 'a') { started.resolve(); await gate(context.signal, release.promise); } else assert.equal(context.results.a.text, 'Result a'); return { text: `Result ${step.id}` }; };
   const saved = await studio.pipelines.save(definition([node('a'), node('b', { dependsOn: ['a'] })]));
-  const run = await studio.runPipeline({ pipelineId: saved.id }); await started.promise;
+  const run = await studio.runPipeline({ pipelineId: saved.id }); await waitForStart(started, settled(studio, run.id));
   await studio.pausePipeline(run.id); release.resolve(); await settled(studio, run.id);
   assert.equal(run.status, 'paused'); assert.deepEqual(calls, ['a']); assert.equal(run.nodeRuns[0].text, 'Result a');
   await studio.resumePipeline(run.id); await settled(studio, run.id);
@@ -96,7 +118,7 @@ test('paused pipeline cannot resume while a manual model load owns the specialis
   studio.pipelines.executeStep = async () => { events.push('pipeline'); return { text: 'Done' }; };
   const saved = await studio.pipelines.save(definition([node('a')]));
   const run = await studio.pipelines.createRun({ pipelineId: saved.id }); await studio.pipelines.pause(run.id);
-  const loading = studio.loadModel('local'); await loadStarted.promise;
+  const loading = studio.loadModel('local'); await waitForStart(loadStarted, loading);
   try {
     await assert.rejects(studio.resumePipeline(run.id), /finish loading/);
     assert.equal(run.status, 'paused'); assert.equal(studio.jobs.length, 0); assert.deepEqual(events, ['load:start']);
@@ -115,8 +137,8 @@ test('a manual load starting during resume preflight holds the queue until loadi
   const run = await studio.pipelines.createRun({ pipelineId: saved.id }); await studio.pipelines.pause(run.id);
   const validate = studio.pipelines.validateModel;
   studio.pipelines.validateModel = async step => { await validate(step); checking.resolve(); await preflightRelease.promise; };
-  const resuming = studio.resumePipeline(run.id); await checking.promise;
-  const loading = studio.loadModel('local'); await loadStarted.promise;
+  const resuming = studio.resumePipeline(run.id); await waitForStart(checking, resuming);
+  const loading = studio.loadModel('local'); await waitForStart(loadStarted, loading);
   try {
     preflightRelease.resolve(); await resuming;
     assert.equal(run.status, 'queued'); assert.equal(studio.active, null); assert.deepEqual(events, ['load:start']);
@@ -125,12 +147,23 @@ test('a manual load starting during resume preflight holds the queue until loadi
   assert.equal(run.status, 'completed'); assert.deepEqual(events, ['load:start', 'load:end', 'pipeline']);
 });
 
+test('manual model admission failure rejects the startup wait without entering the fixture engine', async t => {
+  const { studio } = await fixture(t, { budgetBytes: 0 }), started = deferred();
+  let engineStarted = false;
+  studio.llama.load = async () => { engineStarted = true; started.resolve(); };
+  const loading = studio.loadModel('local');
+  await assert.rejects(waitForStart(started, loading), /available after the safety buffer/);
+  assert.equal(engineStarted, false);
+  assert.equal(studio.loadingModel, false);
+  assert.equal(studio.manualLoadPromise, null);
+});
+
 test('cancelling an active pipeline aborts its step and releases the shared queue for later chat', async t => {
   const { studio } = await fixture(t);
   const started = deferred(), never = deferred(), calls = [];
   studio.pipelines.executeStep = async (step, context) => { calls.push(step.id); started.resolve(); await gate(context.signal, never.promise); return { text: 'Unexpected' }; };
   const saved = await studio.pipelines.save(definition([node('a'), node('b', { dependsOn: ['a'] })]));
-  const run = await studio.runPipeline({ pipelineId: saved.id }); await started.promise;
+  const run = await studio.runPipeline({ pipelineId: saved.id }); await waitForStart(started, settled(studio, run.id));
   const manual = await studio.enqueue({ kind: 'chat', modelId: 'local', prompt: 'Later' });
   await studio.cancel(run.id); await settled(studio, manual.id);
   assert.equal(run.status, 'cancelled'); assert.deepEqual(calls, ['a']); assert.equal(manual.status, 'completed');
@@ -143,9 +176,9 @@ test('closing the app interrupts active pipelines and restart resumes only unfin
   const started = deferred(), never = deferred(), calls = [];
   studio.pipelines.executeStep = async (step, context) => { calls.push(step.id); if (step.id === 'b') { started.resolve(); await gate(context.signal, never.promise); } return { text: `Result ${step.id}` }; };
   const saved = await studio.pipelines.save(definition([node('a'), node('b', { dependsOn: ['a'] }), node('c', { dependsOn: ['b'] })]));
-  const run = await studio.runPipeline({ pipelineId: saved.id }); await started.promise;
+  const run = await studio.runPipeline({ pipelineId: saved.id }); await waitForStart(started, settled(studio, run.id));
   await studio.close(); assert.equal(run.status, 'interrupted'); assert.equal(run.nodeRuns[0].status, 'completed');
-  const reopened = new Studio(directory); configure(reopened); studios.push(reopened);
+  const reopened = new Studio(directory); configure(reopened, t); studios.push(reopened);
   const resumed = [];
   reopened.pipelines.executeStep = async (step, context) => { resumed.push(step.id); if (step.id === 'b') assert.equal(context.results.a.text, 'Result a'); return { text: `Resumed ${step.id}` }; };
   await reopened.init(); assert.deepEqual(resumed, []); assert.equal(reopened.pipelines.getRun(run.id).status, 'interrupted'); assert.equal(reopened.active, null);
@@ -161,7 +194,7 @@ test('pipeline HTTP endpoints enforce local mutation checks and graph validation
   try { service = await startServer({ port: 0, dataDir: directory, autoSetup: false }); }
   finally { Studio.prototype.rescan = originalRescan; Studio.prototype.telemetry = originalTelemetry; }
   t.after(async () => { await service?.close(); await fs.rm(directory, { recursive: true, force: true }); });
-  configure(service.studio);
+  configure(service.studio, t);
   const calls = [];
   service.studio.pipelines.executeStep = async step => { calls.push(step.id); return { text: `Result ${step.id}` }; };
   const post = (route, value, headers = {}) => fetch(service.url + route, { method: 'POST', headers: { 'content-type': 'application/json', 'x-tim-request': '1', ...headers }, body: JSON.stringify(value) });

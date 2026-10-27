@@ -6,19 +6,46 @@ import path from 'node:path';
 import { Studio } from '../server/studio.mjs';
 import { agentTools, validateCall } from '../server/agent.mjs';
 import { Llama } from '../server/llama.mjs';
+import { MemoryMonitor } from '../server/memory.mjs';
 
 const call = (name = 'run_image', args = { modelId: 'image', prompt: 'A tree' }, id = 'call-1') => ({ id, type: 'function', function: { name, arguments: JSON.stringify(args) } });
 const invoking = c => ({ content: null, tool_calls: [c] });
+const GiB = 2 ** 30;
+
+async function bounded(operation, label, timeout = 3000) {
+  let timer;
+  try {
+    return await Promise.race([operation, new Promise((_resolve, reject) => { timer = setTimeout(() => reject(new Error(`Timed out waiting for ${label}.`)), timeout); })]);
+  } finally { clearTimeout(timer); }
+}
+
+async function waitForSpecialist(ready, studio, job) {
+  await bounded(Promise.race([
+    ready,
+    settled(studio, job).then(() => { throw new Error(`The agent finished before its specialist started: ${job.phase}`); })
+  ]), 'the fixture specialist to start');
+}
+
 async function fixture(t) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'tim-agent-test-'));
+  t.mock.method(os, 'totalmem', () => 16 * GiB);
   const studio = new Studio(dir), loads = [], turns = [], media = [];
+  // Native memory commands can outlast the intentionally short timeout tests.
+  // These fake engines use fixed capacity; memory probes have separate tests.
+  const totalBytes = 16 * GiB, availableBytes = 12 * GiB, reserveBytes = Math.round(totalBytes * .1);
+  studio.memoryMonitor = new MemoryMonitor({
+    total: () => totalBytes,
+    free: () => availableBytes,
+    host: async () => ({ total: totalBytes, totalBytes, free: availableBytes, availableBytes, usedBytes: totalBytes - availableBytes, reserveBytes, modelBudgetBytes: availableBytes - reserveBytes, availableSource: 'os' }),
+    processes: async () => new Map()
+  });
   for (const name of ['work', 'outputs', 'uploads']) await fs.mkdir(path.join(dir, name));
   studio.config = { mainAgentModelId: 'main', agentMaxSteps: 4, agentTimeoutSeconds: 5, backend: 'cpu', context: 4096, maxTokens: 100, temperature: .1, systemPrompt: 'test' };
   studio.registry = { models: ['main', 'coder', 'image', 'upscale', 'transcribe'].map(id => ({ id, name: id, kind: ['main', 'coder'].includes(id) ? 'chat' : id, available: true })), runtimes: Object.fromEntries(['chat', 'image', 'upscale', 'transcribe'].map(k => [k, { backend: 'cpu' }])) };
   studio.llama = { load: async model => { loads.push(model.id); }, unload: async () => { loads.push('unload'); }, generate: async (_m, _s, signal, token) => { signal.throwIfAborted(); token('specialist text'); }, turn: async messages => { turns.push(structuredClone(messages)); return { content: 'Done' }; } };
   studio.orchestrator = studio.llama;
   studio.generateMedia = async args => { media.push(args); return { text: 'Artifact created', artifact: { filename: `${args.id}.png`, kind: 'image', size: 1 } }; };
-  t.after(async () => { await studio.close(); await fs.rm(dir, { recursive: true, force: true }); });
+  t.after(async () => { await bounded(studio.close(), 'agent fixture cleanup', 5000); await fs.rm(dir, { recursive: true, force: true }); });
   return { studio, dir, loads, turns, media };
 }
 async function settled(studio, job) {
@@ -106,14 +133,48 @@ test('specialist failure is returned to main model, without reporting a successf
 });
 
 for (const timeout of [false, true]) test(timeout ? 'whole-turn timeout aborts specialist and releases queue' : 'cancellation aborts active specialist and releases queue', async t => {
-  const { studio } = await fixture(t); if (timeout) studio.config.agentTimeoutSeconds = .03;
+  const { studio } = await fixture(t);
+  if (timeout) {
+    studio.config.agentTimeoutSeconds = 1;
+    // Exercise timeout during specialist execution independently of filesystem
+    // runtime discovery. The real guide loader is covered by other tests.
+    studio.loadOrchestrator = async (model, signal, update) => {
+      signal.throwIfAborted();
+      await studio.orchestrator.load(model, studio.registry.runtimes.chat, signal, update, 4096, true);
+    };
+  }
   let started; const ready = new Promise(r => { started = r; });
   studio.llama.turn = async () => invoking(call());
   studio.generateMedia = async ({ signal }) => { started(); await new Promise((resolve, reject) => { if (signal.aborted) reject(signal.reason); else signal.addEventListener('abort', () => reject(signal.reason), { once: true }); }); };
-  const job = await studio.enqueue({ kind: 'agent', prompt: 'Draw' }); await ready;
+  const job = await studio.enqueue({ kind: 'agent', prompt: 'Draw' }); await waitForSpecialist(ready, studio, job);
   if (!timeout) await studio.cancel(job.id);
   await settled(studio, job); assert.equal(job.status, timeout ? 'failed' : 'cancelled'); assert.equal(studio.active, null); assert.equal(job.children[0].status, 'cancelled');
   assert.match(job.phase, timeout ? /timed out/ : /Cancelled/);
+});
+
+test('a timeout during slow memory preparation settles without waiting forever for specialist startup', async t => {
+  const { studio } = await fixture(t);
+  studio.config.agentTimeoutSeconds = .03;
+  const host = studio.memoryMonitor.host;
+  let memoryProbed = false, specialistStarted = false;
+  studio.memoryMonitor.host = async (...args) => {
+    memoryProbed = true;
+    await new Promise(resolve => setTimeout(resolve, 100));
+    return host(...args);
+  };
+  const load = studio.loadOrchestrator.bind(studio);
+  studio.loadOrchestrator = async (...args) => { await studio.sampleMemory(); await load(...args); };
+  studio.llama.turn = async () => invoking(call());
+  let started;
+  const ready = new Promise(resolve => { started = resolve; });
+  studio.generateMedia = async () => { specialistStarted = true; started(); return { text: 'Unexpected' }; };
+  const job = await studio.enqueue({ kind: 'agent', prompt: 'Draw' });
+  await assert.rejects(waitForSpecialist(ready, studio, job), /before its specialist started:.*timed out/);
+  assert.equal(memoryProbed, true);
+  assert.equal(specialistStarted, false);
+  assert.equal(job.status, 'failed');
+  assert.equal(studio.active, null);
+  assert.deepEqual(job.children, []);
 });
 
 test('generated artifact references can feed a subsequent specialist', async t => {
@@ -189,12 +250,25 @@ test('agent settings enforce bounded steps and time and reject unavailable main 
 });
 
 test('cancelling a queued agent does not start any child work', async t => {
-  const { studio, media } = await fixture(t); let release;
-  studio.llama.generate = async (_m, _s, _a, token) => { await new Promise(r => { release = r; }); token('done'); };
+  const { studio, media } = await fixture(t); let release, started;
+  const ready = new Promise(resolve => { started = resolve; });
+  studio.llama.generate = async (_m, _s, signal, token) => {
+    await new Promise((resolve, reject) => {
+      const abort = () => reject(signal.reason || new Error('Cancelled'));
+      signal.throwIfAborted();
+      signal.addEventListener('abort', abort, { once: true });
+      release = () => { signal.removeEventListener('abort', abort); resolve(); };
+      started();
+    });
+    token('done');
+  };
   const first = await studio.enqueue({ kind: 'chat', modelId: 'coder', prompt: 'First' });
-  const queued = await studio.enqueue({ kind: 'agent', prompt: 'Draw' });
-  await studio.cancel(queued.id); release(); await settled(studio, first);
-  assert.equal(queued.status, 'cancelled'); assert.equal(media.length, 0); assert.equal(queued.children, undefined);
+  await waitForSpecialist(ready, studio, first);
+  try {
+    const queued = await studio.enqueue({ kind: 'agent', prompt: 'Draw' });
+    await studio.cancel(queued.id); release(); await settled(studio, first);
+    assert.equal(queued.status, 'cancelled'); assert.equal(media.length, 0); assert.equal(queued.children, undefined);
+  } finally { release(); }
 });
 
 

@@ -6,13 +6,36 @@ import path from 'node:path';
 import { Studio } from '../server/studio.mjs';
 import { catalogModels, defaultOrchestratorId } from '../server/catalog.mjs';
 import { startServer } from '../server/index.mjs';
+import { MemoryMonitor } from '../server/memory.mjs';
 
 const guide = () => ({ id: `catalog:${defaultOrchestratorId}`, catalogId: defaultOrchestratorId, name: 'Small guide', kind: 'chat', file: '/models/guide.gguf', available: true, issue: '' });
 const deferred = () => { let resolve; const promise = new Promise(r => { resolve = r; }); return { promise, resolve }; };
+const GiB = 2 ** 30;
 
-async function fixture(t) {
+async function waitForStart(started, operation) {
+  let timer;
+  try {
+    await Promise.race([
+      started.promise,
+      operation.then(() => { throw new Error('The model load finished before the fixture engine started.'); }),
+      new Promise((_resolve, reject) => { timer = setTimeout(() => reject(new Error('Timed out waiting for the fixture engine to start.')), 2000); })
+    ]);
+  } finally { clearTimeout(timer); }
+}
+
+async function fixture(t, { budgetBytes = 8 * GiB } = {}) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'tim-setup-'));
+  // These engines are fixtures: runner memory pressure must not decide whether
+  // their load callbacks run. Real admission behavior is tested explicitly below.
+  t.mock.method(os, 'totalmem', () => 16 * GiB);
   const studio = new Studio(dir), installed = [], downloads = [], calls = [];
+  const totalBytes = 16 * GiB, reserveBytes = Math.round(totalBytes * .1);
+  studio.memoryMonitor = new MemoryMonitor({
+    total: () => totalBytes,
+    free: () => budgetBytes + reserveBytes,
+    host: async () => ({ total: totalBytes, totalBytes, free: budgetBytes + reserveBytes, availableBytes: budgetBytes + reserveBytes, usedBytes: totalBytes - budgetBytes - reserveBytes, reserveBytes, modelBudgetBytes: budgetBytes, availableSource: 'os' }),
+    processes: async () => new Map()
+  });
   studio.downloads = { async init() {}, async close() {}, snapshot: () => structuredClone(downloads), installedModels: async () => structuredClone(installed) };
   studio.rescan = async () => {}; studio.telemetry = async () => {};
   await studio.init();
@@ -80,18 +103,31 @@ test('cancelling a request waiting for background guide warmup releases the wait
   const { studio, installed } = await fixture(t), started = deferred(), finish = deferred();
   installed.push(guide()); studio.registry.runtimes.chat = { backend: 'cpu' }; await studio.refreshDownloadedModels();
   studio.orchestrator.load = async model => { started.resolve(); await finish.promise; studio.orchestrator.modelId = model.id; };
-  const warmup = studio.warmGuide(); await started.promise;
-  const controller = new AbortController();
-  const waiting = studio.loadOrchestrator(studio.registry.models[0], controller.signal, () => {});
-  const observed = waiting.then(() => ({ completed: true }), error => ({ error }));
-  controller.abort(new Error('Cancelled pending request'));
-  let timer;
+  const warmup = studio.warmGuide();
+  let timer, observed;
   try {
+    await waitForStart(started, warmup);
+    const controller = new AbortController();
+    const waiting = studio.loadOrchestrator(studio.registry.models[0], controller.signal, () => {});
+    observed = waiting.then(() => ({ completed: true }), error => ({ error }));
+    controller.abort(new Error('Cancelled pending request'));
     const result = await Promise.race([observed, new Promise(resolve => { timer = setTimeout(() => resolve({ timeout: true }), 150); })]);
     assert.equal(result.timeout, undefined, 'A cancelled request must not wait for the separate warmup to complete');
     assert.match(result.error?.message || '', /Cancelled pending request/);
   } finally { clearTimeout(timer); finish.resolve(); await warmup; await observed; }
   assert.equal(studio.orchestrator.modelId, guide().id);
+});
+
+test('a guide rejected by memory admission fails the load-start wait instead of hanging the fixture', async t => {
+  const { studio, installed } = await fixture(t, { budgetBytes: 0 }), started = deferred();
+  installed.push(guide()); studio.registry.runtimes.chat = { backend: 'cpu' }; await studio.refreshDownloadedModels();
+  let engineStarted = false;
+  studio.orchestrator.load = async () => { engineStarted = true; started.resolve(); };
+  const warmup = studio.warmGuide();
+  await assert.rejects(waitForStart(started, warmup), /available after the safety buffer/);
+  assert.equal(engineStarted, false, 'Admission rejects the request before the fake engine starts.');
+  assert.equal(studio.guideLoadPromise, null);
+  assert.equal(studio.guideSnapshot().status, 'error');
 });
 
 test('download completion refreshes the installed model list without resetting its guide selection', async t => {
@@ -107,7 +143,6 @@ test('download completion refreshes the installed model list without resetting i
 
 test('memory admission reserves the configured guide rather than the default guide size', async t => {
   const { studio } = await fixture(t);
-  t.mock.method(os, 'totalmem', () => 16 * 1024 ** 3);
   const main = { id: 'large-main', catalogId: 'qwen3-14b', name: 'Large main', kind: 'chat', available: true };
   const specialist = { id: 'specialist', catalogId: 'qwen3-8b', name: 'Specialist', kind: 'chat', available: true };
   studio.registry.models = [main, specialist]; studio.config.mainAgentModelId = main.id;
@@ -125,7 +160,7 @@ test('closing waits for a cancelled manual model load to finish its cleanup', as
   };
   const loading = studio.loadModel('coder');
   const observed = loading.then(() => ({ completed: true }), error => ({ error }));
-  await started.promise; await studio.close();
+  await waitForStart(started, loading); await studio.close();
   assert.ok((await observed).error); assert.equal(studio.loadingModel, false); assert.equal(studio.manualLoadPromise, null);
 });
 
