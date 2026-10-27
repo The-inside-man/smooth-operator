@@ -16,6 +16,7 @@
     "test": "node --test tests/*.test.mjs",
     "test:ui": "node scripts/check-ui.mjs",
     "test:catalog-ui": "npm run build && node scripts/check-model-library.mjs",
+    "test:defaults-ui": "npm run build && node scripts/check-model-defaults.mjs",
     "smoke:guide": "node scripts/smoke-guide.mjs",
     "smoke:app-help": "node scripts/smoke-app-help.mjs",
     "test:pipelines-ui": "npm run build && node scripts/check-pipelines-ui.mjs",

@@ -1,4 +1,5 @@
-const { app, BrowserWindow, ipcMain, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
+const { isModelLink } = require('./model-links.cjs');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const fs = require('node:fs');
@@ -15,6 +16,10 @@ else {
     window = new BrowserWindow({ width: 1500, height: 960, minWidth: 900, minHeight: 640, show: process.env.TIM_HEADLESS !== '1', backgroundColor: '#080b1b', title: 'TIM Studio', autoHideMenuBar: true,
       webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true } });
     const valid = event => event.senderFrame?.url?.startsWith(service.url + '/');
+    ipcMain.handle('open-model-link', async (event, url) => {
+      if (!valid(event) || !isModelLink(url)) return false;
+      await shell.openExternal(url); return true;
+    });
     ipcMain.handle('pick-library', async event => { if (!valid(event)) return null; const result = await dialog.showOpenDialog(window, { title: 'Choose the TIM drive or library root', properties: ['openDirectory'] }); return result.canceled ? null : result.filePaths[0]; });
     ipcMain.handle('save-output', async (event, filename) => {
       if (!valid(event) || typeof filename !== 'string' || path.basename(filename) !== filename) return false;

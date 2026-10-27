@@ -9,15 +9,19 @@ import { Store } from './store.mjs';
 import { discoverLibrary, findRuntime } from './platform.mjs';
 import { scanLibrary } from './registry.mjs';
 import { Llama } from './llama.mjs';
-import { generateMedia } from './engines.mjs';
+import { LlamaPool } from './llama-pool.mjs';
+import { generateMedia, mediaInputMode, validateMediaInput } from './engines.mjs';
 import { runAgent } from './agent.mjs';
 import { catalogModels, defaultOrchestratorId } from './catalog.mjs';
 import { DownloadManager } from './downloads.mjs';
 import { ensureChatRuntime, findSystemChatRuntime } from './runtime-setup.mjs';
 import { PipelineManager, validatePipeline } from './pipelines.mjs';
 import { createPipelineExecutor, validatePipelineModel } from './pipeline-executor.mjs';
+import { MemoryMonitor, estimateModelBytes } from './memory.mjs';
 const exec = promisify(execFile);
-const defaults = { mainAgentModelId: '', agentMaxSteps: 4, agentTimeoutSeconds: 600, libraryRoot: '', backend: 'auto', systemPrompt: 'You are TIM, a capable local AI assistant. Help users choose suitable local models, explain their strengths and memory needs, and be clear, practical, and accurate.', temperature: 0.7, maxTokens: 1024, context: 4096, scanlines: false };
+const defaultModelKinds = { chat: 'chat', code: 'chat', image: 'image', upscale: 'upscale', video: 'video', transcribe: 'transcribe' };
+const defaultModes = ['agent', ...Object.keys(defaultModelKinds)];
+const defaults = { mainAgentModelId: '', defaultMode: 'agent', defaultModels: {}, agentMaxSteps: 4, agentTimeoutSeconds: 600, libraryRoot: '', backend: 'auto', systemPrompt: 'You are TIM, a capable local AI assistant. Help users choose suitable local models, explain their strengths and memory needs, and be clear, practical, and accurate.', temperature: 0.7, maxTokens: 1024, context: 4096, scanlines: false };
 const numeric = (value, fallback, min, max, integer = true) => { const n = value === undefined ? fallback : Number(value); if (!Number.isFinite(n) || n < min || n > max || (integer && !Number.isInteger(n))) throw new Error(`Value must be ${integer ? 'an integer ' : ''}between ${min} and ${max}.`); return n; };
 const waitForLoad = (promise, signal) => new Promise((resolve, reject) => {
   signal.throwIfAborted();
@@ -25,10 +29,10 @@ const waitForLoad = (promise, signal) => new Promise((resolve, reject) => {
   signal.addEventListener('abort', abort, { once: true });
   Promise.resolve(promise).then(resolve, reject).finally(() => signal.removeEventListener('abort', abort));
 });
-export function jobSettings(body, kind) {
+export function jobSettings(body, kind, model) {
   const s = body.settings || {};
   const video = kind === 'video';
-  const width = numeric(s.width, 512, 64, 2048), height = numeric(s.height, video ? 288 : 512, 64, 2048);
+  const width = numeric(s.width, model?.profile?.width || 512, 64, 2048), height = numeric(s.height, model?.profile?.height || (video ? 288 : 512), 64, 2048);
   if (width % 32 || height % 32) throw new Error('Dimensions must be multiples of 32.');
   const frames = numeric(s.frames, 33, 5, 121);
   if ((frames - 1) % 4) throw new Error('Video frames must be 4n + 1.');
@@ -37,8 +41,8 @@ export function jobSettings(body, kind) {
 export class Studio extends EventEmitter {
   constructor(dataDir) {
     super(); this.dataDir = dataDir; this.store = new Store(dataDir); this.sessions = []; this.jobs = []; this.registry = { models: [], runtimes: {} }; this.active = null; this.closing = false;
-    this.workDir = path.join(dataDir, 'work'); this.outputDir = path.join(dataDir, 'outputs'); this.uploadDir = path.join(dataDir, 'uploads'); this.llama = new Llama(this.workDir); this.generateMedia = generateMedia; this.gpu = null;
-    this.orchestrator = new Llama(this.workDir); this.catalog = catalogModels;
+    this.workDir = path.join(dataDir, 'work'); this.outputDir = path.join(dataDir, 'outputs'); this.uploadDir = path.join(dataDir, 'uploads'); this.llama = new LlamaPool(this.workDir); this.generateMedia = args => this.runMedia(args); this.gpu = null;
+    this.orchestrator = new Llama(this.workDir); this.catalog = catalogModels; this.memoryMonitor = new MemoryMonitor();
     this.lifecycle = new AbortController(); this.runtimeSetup = { status: 'idle' }; this.guideState = {};
     this.downloads = new DownloadManager(dataDir, { onChange: jobs => this.downloadChanged(jobs) });
     this.pipelines = new PipelineManager(dataDir, { executeStep: createPipelineExecutor(this), validateModel: node => validatePipelineModel(this, node), onChange: () => this.pipelineChanged() });
@@ -75,8 +79,7 @@ export class Studio extends EventEmitter {
     }
     this.registry.models = [...this.registry.models.filter(model => !model.catalogId), ...downloaded];
     const guide = this.registry.models.find(model => model.catalogId === defaultOrchestratorId);
-    const configured = this.registry.models.find(model => model.id === this.config.mainAgentModelId && model.available);
-    if (!configured && guide) {
+    if (!this.config.mainAgentModelId && guide) {
       this.config.mainAgentModelId = guide.id;
       await this.store.write('settings', this.config);
     }
@@ -90,14 +93,30 @@ export class Studio extends EventEmitter {
     this.modelSync = (this.modelSync || Promise.resolve()).catch(() => {}).then(() => this.refreshDownloadedModels()).catch(error => { this.guideState = { status: 'error', error: error.message }; this.changed(); });
   }
   guideSnapshot() {
-    const model = this.registry.models.find(m => m.id === this.config?.mainAgentModelId);
+    const configuredId = this.config?.mainAgentModelId;
+    const model = this.registry.models.find(m => m.id === configuredId);
+    const entry = this.catalog.find(c => c.id === model?.catalogId || c.id === (configuredId?.startsWith('catalog:') ? configuredId.slice(8) : !configuredId ? defaultOrchestratorId : null));
+    const catalogId = model?.catalogId || entry?.id || '';
     const loaded = Boolean(this.orchestrator.modelId && this.orchestrator.modelId === model?.id);
-    const download = this.downloads.snapshot().find(d => d.catalogId === defaultOrchestratorId);
+    const download = this.downloads.snapshot().find(d => d.catalogId === catalogId);
     const status = loaded ? 'running' : this.guideState.status === 'loading' ? 'loading' : this.guideState.error ? 'error' : !model ? 'not-installed' : !model.available ? 'needs-runtime' : 'ready';
-    return { catalogId: defaultOrchestratorId, modelId: model?.id, name: model?.name, loaded, status, error: this.guideState.error || (download?.status === 'failed' ? download.error : undefined), memoryGB: model ? this.catalog.find(c => c.id === model.catalogId)?.memoryGB : this.catalog.find(c => c.defaultOrchestrator)?.memoryGB };
+    const estimatedBytes = estimateModelBytes(model, this.catalog);
+    return { catalogId, modelId: configuredId || undefined, name: model?.name || entry?.name, loaded, status, error: this.guideState.error || (configuredId && this.guideSelectionError()) || (download?.status === 'failed' ? download.error : undefined), memoryGB: estimatedBytes ? estimatedBytes / 2 ** 30 : entry?.memoryGB };
+  }
+  guideSelectionError() {
+    const model = this.registry.models.find(m => m.id === this.config.mainAgentModelId && m.kind === 'chat');
+    if (!model) return 'Your selected default agent is no longer installed. Reconnect its model library or choose another agent in Settings.';
+    if (!model.available || !this.registry.runtimes.chat) return `${model.name} is not ready: ${model.issue || 'a compatible chat engine is required'}. Set up this model or choose another agent in Settings.`;
+    return null;
   }
   async setupGuide() {
     if (this.setupPromise) return;
+    if (this.config.mainAgentModelId) {
+      const error = this.guideSelectionError();
+      if (error) { this.guideState = { status: 'error', error }; this.changed(); return; }
+      await this.warmGuide();
+      return;
+    }
     this.runtimeSetup = { status: 'downloading', progress: 0 }; this.guideState = {}; this.changed();
     // Setup runs in the background so the catalog and progress remain usable.
     this.setupPromise = (async () => {
@@ -122,8 +141,11 @@ export class Studio extends EventEmitter {
     })();
   }
   async startDefaultGuide() {
-    const model = this.registry.models.find(m => m.id === this.config.mainAgentModelId && m.available);
-    if (model) this.warmGuide().catch(error => { this.guideState = { status: 'error', error: error.message }; this.changed(); });
+    if (this.config.mainAgentModelId) {
+      const error = this.guideSelectionError();
+      if (error) { this.guideState = { status: 'error', error }; this.changed(); return; }
+      this.warmGuide().catch(error => { this.guideState = { status: 'error', error: error.message }; this.changed(); });
+    }
     else {
       const prior = this.downloads.snapshot().find(d => d.catalogId === defaultOrchestratorId);
       if (prior && ['cancelled', 'paused', 'failed'].includes(prior.status)) { this.guideState = { status: 'error', error: prior.error || 'Guide setup paused. Retry to continue.' }; this.changed(); }
@@ -131,10 +153,14 @@ export class Studio extends EventEmitter {
     }
   }
   async warmGuide() {
+    if (this.closing) return;
+    const error = this.guideSelectionError();
+    if (error) throw new Error(error);
     const model = this.registry.models.find(m => m.id === this.config.mainAgentModelId);
-    if (model?.available && !this.closing) await this.loadOrchestrator(model, this.lifecycle.signal, () => this.changed());
+    await this.loadOrchestrator(model, this.lifecycle.signal, () => this.changed());
   }
   async loadOrchestrator(model, signal, update) {
+    this.orchestrator.fixedContext = true;
     if (this.guideLoadPromise) await waitForLoad(this.guideLoadPromise, signal);
     signal.throwIfAborted();
     if (!model?.available || !this.registry.runtimes.chat) throw new Error('The TIM guide needs an installed model and chat engine.');
@@ -142,6 +168,7 @@ export class Studio extends EventEmitter {
     this.guideLoadPromise = (async () => {
       try {
         const runtime = await findRuntime(this.libraryRoot, 'chat', 'cpu', this.dataDir) || await findSystemChatRuntime('cpu') || this.registry.runtimes.chat;
+        await this.sampleMemory(); this.assertModelMemory(model, { role: 'guide' });
         await this.orchestrator.load(model, { ...runtime, backend: 'cpu', threads: Math.min(4, os.availableParallelism()) }, signal, update, 4096, true);
         this.guideState = { status: 'running' };
       } catch (error) { this.guideState = { status: 'error', error: error.message }; throw error; }
@@ -150,15 +177,14 @@ export class Studio extends EventEmitter {
     await this.guideLoadPromise;
   }
   async loadModel(id) {
-    if (this.active || this.loadingModel || this.jobs.some(j => j.status === 'queued')) throw new Error('Finish or cancel current work before loading a model.');
+    if (this.active || this.loadingModel || this.guideLoadPromise || this.jobs.some(j => j.status === 'queued')) throw new Error('Finish or cancel current work before loading a model.');
     const model = this.registry.models.find(m => m.id === id && m.available);
     if (!model || model.kind !== 'chat') throw new Error('Choose an installed chat or code model. Media models load when used.');
-    this.assertModelMemory(model);
     this.loadingModel = true; this.changed();
     this.manualLoadPromise = (async () => {
-      await this.pipelineAgent?.unload();
       if (id === this.config.mainAgentModelId) await this.loadOrchestrator(model, this.lifecycle.signal, () => this.changed());
-      else await this.loadChat(model, this.lifecycle.signal, () => this.changed());
+      else { await this.loadChat(model, this.lifecycle.signal, () => this.changed()); this.llama.pin?.(id); }
+      await this.sampleMemory();
     })();
     try {
       await this.manualLoadPromise;
@@ -168,17 +194,44 @@ export class Studio extends EventEmitter {
     }
   }
   async unloadModel(id) {
-    if (this.active || this.loadingModel || this.guideLoadPromise) throw new Error('Finish or cancel current work before unloading.');
+    if (this.active || this.loadingModel || this.guideLoadPromise || this.jobs.some(j => j.status === 'queued')) throw new Error('Finish or cancel current work before unloading.');
     if (id && id === this.config.mainAgentModelId) throw new Error('The lightweight TIM guide stays loaded. Other models can be unloaded.');
-    await this.llama.unload(); this.changed();
-    await this.pipelineAgent?.unload();
+    this.loadingModel = true; this.changed();
+    try {
+      if (!id) { await this.unloadSpecialists(); await this.pipelineAgent?.unload(); }
+      else {
+        if (this.llama.has?.(id) || this.llama.modelId === id) await this.llama.unload(id);
+        if (this.pipelineAgent?.modelId === id) await this.pipelineAgent.unload();
+      }
+      await this.sampleMemory();
+    } finally { this.loadingModel = false; this.changed(); }
   }
-  assertModelMemory(model) {
-    const entry = this.catalog.find(c => c.id === model?.catalogId);
+  async unloadSpecialists() {
+    if (this.llama.unloadAll) await this.llama.unloadAll(); else await this.llama.unload();
+  }
+  async releaseSpecialist() {
+    if (this.llama.release) await this.llama.release(); else await this.llama.unload();
+  }
+  assertModelMemory(model, { role = 'specialist' } = {}) {
     const guideModel = this.registry.models.find(m => m.id === this.config.mainAgentModelId);
     const guide = this.catalog.find(c => c.id === guideModel?.catalogId) || this.catalog.find(c => c.defaultOrchestrator);
-    const reserve = model?.id === this.config.mainAgentModelId ? 0 : (guide?.memoryGB || 1);
-    if (entry?.memoryGB && entry.memoryGB + reserve + 1 > os.totalmem() / 1024 ** 3) throw new Error(`${model.name} needs about ${entry.memoryGB} GB plus space for TIM and the guide. Choose a smaller model for this machine.`);
+    const instances = this.llama.instances?.() || [];
+    const residents = [
+      { engine: this.orchestrator, role: 'guide' },
+      ...(this.llama.instances ? instances : [{ engine: this.llama }]).map(item => ({ ...item, role: 'specialist' })),
+      { engine: this.pipelineAgent, role: 'pipeline-agent' },
+      { engine: this.mediaEngine, role: 'media' }
+    ].filter(item => item.engine?.modelId);
+    // Different roles can load the same weights into distinct processes. Only
+    // the exact process being reused/replaced is excluded from the total.
+    const replacing = item => item.role === role && (role !== 'specialist' || item.engine.modelId === model?.id);
+    const otherBytes = residents.filter(item => !replacing(item)).reduce((sum, item) => sum + (estimateModelBytes(this.registry.models.find(m => m.id === item.engine.modelId), this.catalog) || .5 * 2 ** 30), 0);
+    const guideReserve = role !== 'guide' && !residents.some(item => item.role === 'guide') ? (estimateModelBytes(guideModel, this.catalog) || (guide?.memoryGB || 1) * 2 ** 30) : 0;
+    const required = estimateModelBytes(model, this.catalog) || .5 * 2 ** 30;
+    if (required + guideReserve + otherBytes + 2 ** 30 > os.totalmem()) throw new Error(`${model.name} needs more room alongside TIM and the loaded models. Choose a smaller model or unload another model.`);
+    const { memory } = this.memoryMonitor.snapshot(this.loadedEngines());
+    const alreadyLoaded = residents.some(item => replacing(item) && item.engine.modelId === model?.id);
+    if (!alreadyLoaded && memory.sampledAt && !memory.stale && required > memory.modelBudgetBytes) throw new Error(`${model.name} needs about ${(required / 2 ** 30).toFixed(1)} GiB, but only ${(memory.modelBudgetBytes / 2 ** 30).toFixed(1)} GiB is available after the safety buffer. Unload a model or close other apps before loading it.`);
   }
   pipelineChanged() {
     for (const run of this.pipelines.runs) {
@@ -248,33 +301,96 @@ export class Studio extends EventEmitter {
       if (!this.closing) queueMicrotask(() => this.drain().catch(error => this.emit('error', error)));
     }
   }
+  loadedEngines() {
+    const entries = [
+      { engine: this.orchestrator, role: 'guide' },
+      ...(this.llama.instances?.() || [{ engine: this.llama }]).map(entry => ({ ...entry, role: 'specialist' })),
+      { engine: this.pipelineAgent, role: 'pipeline-agent' },
+      { engine: this.mediaEngine, role: 'media' }
+    ];
+    const seen = new Set();
+    return entries.flatMap(entry => {
+      const child = entry.engine?.child;
+      const model = this.registry.models.find(model => model.id === entry.engine?.modelId);
+      if (!model || !child || child.exitCode !== null || child.signalCode !== null || seen.has(child)) return [];
+      seen.add(child);
+      return [{ ...entry, model }];
+    });
+  }
+  async sampleMemory() {
+    this.memoryMonitor.catalog = this.catalog;
+    await this.memoryMonitor.sample(this.loadedEngines());
+    this.changed();
+    // Refresh the live collection in case a child exited while it was measured.
+    return this.memoryMonitor.snapshot(this.loadedEngines());
+  }
+  async runMedia(args) {
+    validateMediaInput(args.kind, args.model, args.input);
+    await this.sampleMemory(); this.assertModelMemory(args.model, { role: 'media' });
+    const engine = { modelId: args.model.id, child: null };
+    this.mediaEngine = engine;
+    try { return await generateMedia({ ...args, onProcess: child => { engine.child = child; this.changed(); } }); }
+    finally { if (this.mediaEngine === engine) this.mediaEngine = null; this.changed(); }
+  }
   async telemetry() {
-    try {
+    await Promise.all([this.sampleMemory(), (async () => { try {
       const { stdout } = await exec('nvidia-smi', ['--query-gpu=name,memory.total,memory.used,utilization.gpu', '--format=csv,noheader,nounits'], { windowsHide: true, timeout: 2500 });
       const [name, total, used, utilization] = stdout.trim().split('\n')[0].split(',').map(x => x.trim());
       this.gpu = { name, total: Number(total), used: Number(used), utilization: Number(utilization) };
-    } catch { this.gpu = null; }
+    } catch { this.gpu = null; } })()]);
     this.changed();
   }
   snapshot() {
     const pipelineState = this.pipelines.snapshot();
-    return { platform: process.platform, arch: process.arch, hostname: os.hostname(), memory: { total: os.totalmem(), free: os.freemem() }, gpu: this.gpu, libraryRoot: this.libraryRoot, dataDir: this.dataDir, config: this.config,
-      models: this.registry.models.map(({ file, profile, ...rest }) => ({ ...rest, defaults: profile && { steps: profile.steps, cfg: profile.cfg } })),
+    this.memoryMonitor.catalog = this.catalog;
+    const memoryState = this.memoryMonitor.snapshot(this.loadedEngines());
+    return { platform: process.platform, arch: process.arch, hostname: os.hostname(), ...memoryState, gpu: this.gpu, libraryRoot: this.libraryRoot, dataDir: this.dataDir, config: this.config,
+      models: this.registry.models.map(({ file, profile, ...rest }) => ({ ...rest, ...(rest.kind === 'image' ? { inputMode: mediaInputMode(rest.kind, { profile }), requiresReference: Boolean(profile?.requiresReference) } : {}), defaults: profile && { steps: profile.steps, cfg: profile.cfg, width: profile.width, height: profile.height } })),
       engines: Object.fromEntries(Object.entries(this.registry.runtimes).map(([kind, r]) => [kind, r ? { available: true, backend: r.backend } : { available: false }])),
       sessions: this.sessions, jobs: this.jobs, loadedModelId: this.llama.modelId, loadingModel: Boolean(this.loadingModel),
-      catalog: this.catalog.map(({ files, ...entry }) => { const model = this.registry.models.find(m => m.catalogId === entry.id); return { ...entry, installed: Boolean(model), modelId: model?.id, issue: model?.issue || '' }; }),
+      catalog: this.catalog.map(({ files, ...entry }) => { const model = this.registry.models.find(m => m.catalogId === entry.id); return { ...entry, bundleFiles: files?.length || 0, ...(entry.kind === 'image' ? { inputMode: mediaInputMode(entry.kind, entry), requiresReference: Boolean(entry.profile?.requiresReference) } : {}), installed: Boolean(model), modelId: model?.id, issue: model?.issue || '' }; }),
       downloads: this.downloads.snapshot(), orchestrator: this.guideSnapshot(), runtimeSetup: this.runtimeSetup,
       pipelines: pipelineState.definitions, pipelineRuns: pipelineState.runs, pipelineAgentModelId: this.pipelineAgent?.modelId || null };
   }
   changed() { if (this.changeTimer) return; this.changeTimer = setTimeout(() => { this.changeTimer = null; this.emit('state', this.snapshot()); }, 75); }
   async persist() { await this.store.write('sessions', this.sessions); await this.store.write('jobs', this.jobs); }
+  validateDefaultModels(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Default models must be a map of modes to installed model IDs.');
+    const result = {};
+    for (const [mode, modelId] of Object.entries(value)) {
+      if (!Object.hasOwn(defaultModelKinds, mode) || typeof modelId !== 'string' || !modelId) throw new Error('Choose a supported mode and an installed default model.');
+      const model = this.registry.models.find(m => m.id === modelId && m.kind === defaultModelKinds[mode]);
+      // A disconnected drive must not erase or prevent saving an existing preference.
+      if (!model?.available && this.config.defaultModels?.[mode] !== modelId) throw new Error(`Choose an installed, available ${defaultModelKinds[mode]} model for ${mode}.`);
+      result[mode] = modelId;
+    }
+    return result;
+  }
+  async setDefaultModel({ mode, modelId } = {}) {
+    if (!defaultModes.includes(mode)) throw new Error('Choose a supported default mode.');
+    const kind = mode === 'agent' ? 'chat' : defaultModelKinds[mode];
+    if (typeof modelId !== 'string' || !modelId || !this.registry.models.some(m => m.id === modelId && m.kind === kind && m.available)) throw new Error(`Choose an installed, available ${kind} model for ${mode}.`);
+    if (mode === 'agent') await this.updateSettings({ mainAgentModelId: modelId, defaultMode: mode });
+    else {
+      // Preferences may change during inference; queued jobs retain their selected ID.
+      this.config = { ...this.config, defaultMode: mode, defaultModels: { ...this.config.defaultModels, [mode]: modelId } };
+      await this.store.write('settings', this.config);
+      this.changed();
+    }
+    return { defaultMode: this.config.defaultMode, defaultModels: this.config.defaultModels, mainAgentModelId: this.config.mainAgentModelId };
+  }
   async updateSettings(values) {
     if (this.active || this.loadingModel || this.guideLoadPromise || this.jobs.some(j => j.status === 'queued')) throw new Error('Finish or cancel jobs before changing engine settings.');
     const next = { ...this.config };
     if (values.mainAgentModelId !== undefined) {
-      if (typeof values.mainAgentModelId !== 'string' || (values.mainAgentModelId && !this.registry.models.some(m => m.id === values.mainAgentModelId && m.kind === 'chat' && m.available))) throw new Error('Select an available chat model for the main agent.');
+      if (typeof values.mainAgentModelId !== 'string' || (values.mainAgentModelId && values.mainAgentModelId !== this.config.mainAgentModelId && !this.registry.models.some(m => m.id === values.mainAgentModelId && m.kind === 'chat' && m.available))) throw new Error('Select an available chat model for the main agent.');
       next.mainAgentModelId = values.mainAgentModelId;
     }
+    if (values.defaultMode !== undefined) {
+      if (!defaultModes.includes(values.defaultMode)) throw new Error('Choose a supported default mode.');
+      next.defaultMode = values.defaultMode;
+    }
+    if (values.defaultModels !== undefined) next.defaultModels = this.validateDefaultModels(values.defaultModels);
     if (values.agentMaxSteps !== undefined) next.agentMaxSteps = numeric(values.agentMaxSteps, 4, 1, 8);
     if (values.agentTimeoutSeconds !== undefined) next.agentTimeoutSeconds = numeric(values.agentTimeoutSeconds, 600, 30, 1800);
     if (values.libraryRoot !== undefined) next.libraryRoot = String(values.libraryRoot);
@@ -286,7 +402,7 @@ export class Studio extends EventEmitter {
     if (values.scanlines !== undefined) next.scanlines = Boolean(values.scanlines);
     if (next.maxTokens >= next.context) throw new Error('Response tokens must be smaller than the context window.');
     if (next.mainAgentModelId !== this.config.mainAgentModelId) { await this.orchestrator.unload(); this.guideState = {}; }
-    await this.llama.unload(); await this.pipelineAgent?.unload(); this.config = next; await this.store.write('settings', next); await this.rescan(); this.changed();
+    await this.unloadSpecialists(); await this.pipelineAgent?.unload(); this.config = next; await this.store.write('settings', next); await this.rescan(); this.changed();
     if (this.config.mainAgentModelId) this.warmGuide().catch(error => { this.guideState = { status: 'error', error: error.message }; this.changed(); });
   }
   async newSession() {
@@ -297,10 +413,11 @@ export class Studio extends EventEmitter {
     if (this.loadingModel) throw new Error('Wait for the selected model to finish loading.');
     const kind = body.kind === 'code' ? 'chat' : body.kind;
     if (!['agent', 'chat', 'image', 'video', 'transcribe', 'upscale'].includes(kind)) throw new Error('Choose an available mode.');
-    const model = this.registry.models.find(m => m.id === (kind === 'agent' ? this.config.mainAgentModelId : body.modelId) && m.kind === (kind === 'agent' ? 'chat' : kind));
+    const modelId = kind === 'agent' ? this.config.mainAgentModelId : body.modelId === undefined ? this.config.defaultModels?.[body.kind] : body.modelId;
+    const model = this.registry.models.find(m => m.id === modelId && m.kind === (kind === 'agent' ? 'chat' : kind));
     if (kind === 'agent' && (!model?.available || !this.registry.runtimes.chat)) throw new Error('Choose an available main agent model in Settings. Native tool-call support must be validated for that model.');
     if (!model?.available) throw new Error(model?.issue || 'Select a compatible model.');
-    const settings = jobSettings(body, kind);
+    const settings = jobSettings(body, kind, model);
     if (!settings.prompt && !['transcribe', 'upscale'].includes(kind)) throw new Error('Enter a prompt.');
     if (settings.prompt.length > 100000) throw new Error('Prompt is too large.');
     const attachments = [];
@@ -317,6 +434,7 @@ export class Studio extends EventEmitter {
     }
     if (['transcribe', 'upscale'].includes(kind) && !attachments.length) throw new Error('This mode needs an attached file.');
     if (!['chat', 'agent'].includes(kind) && attachments.length > 1) throw new Error('This workflow accepts one attachment at a time.');
+    validateMediaInput(kind, model, attachments[0]);
     let session = this.sessions.find(s => s.id === body.sessionId);
     if (!session) session = await this.newSession();
     const id = randomUUID();
@@ -328,6 +446,8 @@ export class Studio extends EventEmitter {
   }
   async loadChat(model, signal, update, toolCalling = false) {
     if (!model?.available || !this.registry.runtimes.chat) throw new Error('Chat model or runtime is unavailable.');
+    if (this.llama.modelId && this.llama.modelId !== model.id) await this.releaseSpecialist();
+    await this.sampleMemory();
     this.assertModelMemory(model);
     try { await this.llama.load(model, this.registry.runtimes.chat, signal, update, this.config.context, toolCalling); }
     catch (error) {
@@ -366,10 +486,13 @@ export class Studio extends EventEmitter {
         }
         job.phase = 'Generating response';
         if (job.kind === 'agent') await runAgent(this, job, message, history, controller.signal);
-        else await this.llama.generate([{ role: 'system', content: this.config.systemPrompt }, ...history], this.config, controller.signal, token => { message.content += token; this.changed(); });
+        else await this.llama.generate([{ role: 'system', content: this.config.systemPrompt }, ...history], { ...this.config, enableThinking: false }, controller.signal, token => { message.content += token; this.changed(); }, usage => {
+          if (usage.removedMessages > 0) { job.contextUsage = usage; message.contextUsage = usage; this.changed(); }
+        });
+        if (!message.content.trim()) throw new Error('The model returned no answer. Try again or choose a different model.');
       } else {
-        await this.llama.unload(); job.phase = 'Loading engine…'; this.changed();
-        const result = await generateMedia({ kind: job.kind, model, runtime: this.registry.runtimes[job.kind], settings: job.settings, input: job.attachments[0] && path.join(this.uploadDir, job.attachments[0]), workDir: this.workDir, outputDir: this.outputDir, id: job.id, signal: controller.signal, onOutput: text => {
+        await this.releaseSpecialist(); job.phase = 'Loading engine…'; this.changed();
+        const result = await this.generateMedia({ kind: job.kind, model, runtime: this.registry.runtimes[job.kind], settings: job.settings, input: job.attachments[0] && path.join(this.uploadDir, job.attachments[0]), workDir: this.workDir, outputDir: this.outputDir, id: job.id, signal: controller.signal, onOutput: text => {
           const percent = [...text.matchAll(/(\d+(?:\.\d+)?)%/g)].at(-1);
           const steps = [...text.matchAll(/(\d+)\s*\/\s*(\d+)\s*[-|]/g)].at(-1);
           if (percent) job.progress = Math.min(99, Number(percent[1]));
@@ -386,7 +509,7 @@ export class Studio extends EventEmitter {
       job.phase = timedOut ? 'Main agent turn timed out.' : controller.signal.aborted ? 'Cancelled' : error.message;
       message.error = job.phase;
       if (model && !controller.signal.aborted) model.validation = 'Last run failed';
-      if (['chat', 'agent'].includes(job.kind)) await this.llama.unload();
+      if (['chat', 'agent'].includes(job.kind)) await this.releaseSpecialist();
     } finally {
       clearTimeout(timer); job.finishedAt = Date.now(); this.active = null; await this.persist(); this.changed();
       if (!this.closing) queueMicrotask(() => this.drain().catch(e => this.emit('error', e)));
@@ -404,7 +527,7 @@ export class Studio extends EventEmitter {
     this.closing = true; this.lifecycle.abort(); clearInterval(this.telemetryTimer); this.active?.controller.abort();
     await this.downloads.close(); await this.setupPromise; await this.modelSync; await this.guideLoadPromise?.catch(() => {});
     await this.manualLoadPromise?.catch(() => {});
-    await this.llama.unload(); await this.pipelineAgent?.unload(); await this.orchestrator.unload();
+    await this.unloadSpecialists(); await this.pipelineAgent?.unload(); await this.orchestrator.unload();
     while (this.active) await new Promise(r => setTimeout(r, 50));
     clearTimeout(this.changeTimer); await this.persist();
   }

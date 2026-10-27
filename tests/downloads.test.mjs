@@ -47,9 +47,10 @@ test('offline catalog describes at least 20 loadable models and pins exact bytes
     assert.match(model.sourceUrl, /^https:\/\/huggingface.co\//);
     assert.ok(['chat', 'transcribe', 'image'].includes(model.kind));
     if (model.kind === 'image') {
-      assert.equal(model.profile.family, 'checkpoint');
-      assert.deepEqual(model.profile.args, {});
-      assert.ok(model.files.every(file => file.path.endsWith('.safetensors')));
+      assert.ok(model.profile.family && ['none', 'img2img', 'reference'].includes(model.profile.inputMode));
+      const companions = new Set(model.files.slice(1).map(file => file.destination || path.posix.basename(file.path)));
+      assert.ok(Object.values(model.profile.args).every(name => companions.has(name)));
+      assert.ok(model.files.every(file => /\.(safetensors|gguf)$/.test(file.path)));
     }
     for (const file of model.files) {
       assert.match(file.revision, /^[a-f0-9]{40}$/);
@@ -89,6 +90,31 @@ test('installed image checkpoints retain the engine recipe', async t => {
   assert.deepEqual(installed[0].profile, model.profile);
   assert.notEqual(installed[0].profile, model.profile);
   await manager.close();
+});
+
+test('complete image bundles install their encoders, projector and VAE beside the diffusion weights', async t => {
+  const dir = await temp(t);
+  const files = ['diffusion.gguf', 'encoder.gguf', 'vision.gguf', 'vae.safetensors'].map(name => ({ name, bytes: Buffer.from(`Fixture ${name}`) }));
+  const model = fixture(files);
+  model.kind = 'image'; model.imageUseCases = ['identity']; model.requirements = ['Reference photo required'];
+  model.profile = { family: 'qwen-image-edit', args: { llm: 'encoder.gguf', llm_vision: 'vision.gguf', vae: 'vae.safetensors' }, inputMode: 'reference', requiresReference: true, steps: 40, cfg: 2.5, width: 1024, height: 1024 };
+  const manager = new DownloadManager(dir, { catalog: [model], fetchImpl: fetcher(model, { response: url => {
+    const file = files.find(file => new URL(url).pathname.endsWith('/' + file.name));
+    return new Response(file.bytes, { headers: { 'content-length': String(file.bytes.length) } });
+  } }) });
+  await manager.start(model.id); await done(manager);
+  assert.equal(manager.snapshot()[0].status, 'completed');
+  const [installed] = await manager.installedModels();
+  assert.equal(path.basename(installed.file), 'diffusion.gguf');
+  assert.deepEqual(installed.profile, model.profile);
+  assert.deepEqual(installed.imageUseCases, ['identity']);
+  for (const name of Object.values(installed.profile.args)) assert.ok((await fs.stat(path.join(path.dirname(installed.file), name))).isFile());
+  await manager.close();
+  const offline = new DownloadManager(dir, { catalog: [model], fetchImpl: () => { throw new Error('Offline'); } });
+  await offline.init(); assert.equal((await offline.installedModels()).length, 1);
+  await fs.unlink(path.join(path.dirname(installed.file), 'vision.gguf'));
+  assert.deepEqual(await offline.installedModels(), []);
+  await offline.close();
 });
 
 test('rejects arbitrary catalog IDs and unsafe manifest paths', async t => {

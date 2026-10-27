@@ -181,7 +181,9 @@ export class DownloadManager {
         }
         models.push({ id: `catalog:${id}`, catalogId: id, name: model.name, kind: model.kind,
           file: path.join(dir, fileName(model.files[0])), relativePath: `models/${id}/${fileName(model.files[0])}`, size: model.downloadBytes,
-          description: model.description, bestFor: [...model.bestFor], profile: model.profile ? copy(model.profile) : null, issue: '', available: true, validation: 'Download verified' });
+          description: model.description, bestFor: [...model.bestFor], profile: model.profile ? copy(model.profile) : null,
+          ...(model.imageUseCases ? { imageUseCases: [...model.imageUseCases] } : {}), ...(model.requirements ? { requirements: [...model.requirements] } : {}),
+          issue: '', available: true, validation: 'Download verified' });
       } catch (error) {
         this.installed.delete(id);
         const job = this.jobs.get(id);

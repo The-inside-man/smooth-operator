@@ -64,6 +64,7 @@ export async function startServer({ port = 4317, dataDir = process.env.TIM_DATA_
       if (url.pathname === '/api/models/cancel' && req.method === 'POST') return json(res, await studio.downloads.cancel((await body(req)).id));
       if (url.pathname === '/api/models/load' && req.method === 'POST') { await studio.loadModel((await body(req)).id); return json(res, { ok: true }); }
       if (url.pathname === '/api/models/unload' && req.method === 'POST') { await studio.unloadModel((await body(req)).id); return json(res, { ok: true }); }
+      if (url.pathname === '/api/models/default' && req.method === 'POST') return json(res, await studio.setDefaultModel(await body(req)));
       if (url.pathname === '/api/unload' && req.method === 'POST') { await studio.unloadModel(); return json(res, { ok: true }); }
       if (url.pathname === '/api/pipelines/save' && req.method === 'POST') return json(res, await studio.pipelines.save((await body(req)).pipeline));
       if (url.pathname === '/api/pipelines/validate' && req.method === 'POST') return json(res, { valid: true, pipeline: studio.validatePipeline((await body(req)).pipeline) });

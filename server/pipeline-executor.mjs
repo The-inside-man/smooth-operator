@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { Llama } from './llama.mjs';
 import { runAgent } from './agent.mjs';
 import { jobSettings } from './studio.mjs';
+import { mediaInputMode, validateMediaInput } from './engines.mjs';
 
 const textFile = /\.(txt|md|js|ts|py|json|csv|html|css)$/i;
 const imageFile = /\.(png|jpg|jpeg|webp)$/i;
@@ -30,7 +31,8 @@ function assertMemory(studio, model, { customAgent, specialist = true } = {}) {
   const custom = customAgent === false ? null : customAgent || modelById(studio, studio.pipelineAgent?.modelId);
   const agentGB = custom && custom.id !== guide?.id ? estimate(studio, custom) : 0;
   const targetGB = specialist && model?.id !== guide?.id ? estimate(studio, model) : 0;
-  const total = residentGuide + agentGB + targetGB + 1;
+  const retainedGB = (studio.llama.instances?.() || []).filter(item => item.pinned && (!specialist || item.modelId !== model?.id)).reduce((sum, item) => sum + estimate(studio, modelById(studio, item.modelId)), 0);
+  const total = residentGuide + agentGB + targetGB + retainedGB + 1;
   if (total > os.totalmem() / 2 ** 30) throw new Error(`${model?.name || custom?.name || 'This step'} needs about ${Math.round(total * 10) / 10} GB including the resident guide, agent, and working space. Choose a smaller model or unload another model.`);
 }
 
@@ -162,24 +164,32 @@ export function createPipelineExecutor(studio) {
     const signal = controller.signal;
     let stagedDir;
     const custom = node.type === 'agent' && model.id !== guideId(studio);
-    const clearSpecialists = async () => { await studio.llama.unload(); await studio.pipelineAgent?.unload(); studio.changed(); };
+    const releaseSpecialist = async () => { if (studio.llama.release) await studio.llama.release(); else await studio.llama.unload(); };
+    const clearSpecialists = async () => {
+      if (policy === 'unload' && model?.id !== guideId(studio)) await studio.llama.unload(model?.id);
+      else await releaseSpecialist();
+      await studio.pipelineAgent?.unload(); studio.changed();
+    };
     try {
       signal.throwIfAborted();
       if (node.type === 'input') return { text: context.input || '' };
       if (node.type === 'unload') {
         update('Unloading specialist models');
-        if (!node.modelId || studio.llama.modelId === node.modelId) await studio.llama.unload();
+        if (!node.modelId) { if (studio.llama.unloadAll) await studio.llama.unloadAll(); else await studio.llama.unload(); }
+        else if (studio.llama.has?.(node.modelId) || studio.llama.modelId === node.modelId) await studio.llama.unload(node.modelId);
         if (!node.modelId || studio.pipelineAgent?.modelId === node.modelId) await studio.pipelineAgent?.unload();
         studio.changed();
         return { text: node.modelId ? 'Selected specialist unloaded. The TIM guide remains available.' : 'Specialist models unloaded. The TIM guide remains available.' };
       }
-      const inputs = selectedInputs(node, await allowedInputs(studio, context));
+      const allowed = await allowedInputs(studio, context);
+      const inputs = node.type === 'image' && !node.inputRef && mediaInputMode(node.type, model) === 'none' ? [] : selectedInputs(node, allowed);
+      validateMediaInput(node.type, model, inputs[0]?.file);
       if (node.type === 'load') {
         await studio.pipelineAgent?.unload();
         if (model.id === guideId(studio)) await studio.loadOrchestrator(model, signal, update);
         else {
-          await studio.llama.unload(); assertMemory(studio, model);
-          const facade = Object.assign(Object.create(studio), { config });
+          await releaseSpecialist(); assertMemory(studio, model);
+          const facade = Object.assign(Object.create(studio), { config, sampleMemory: studio.sampleMemory?.bind(studio) });
           await studio.loadChat.call(facade, model, signal, update);
         }
         signal.throwIfAborted(); studio.changed();
@@ -188,12 +198,15 @@ export function createPipelineExecutor(studio) {
       // The persistent guide has its own process. A custom pipeline agent gets a third
       // process so selecting one never replaces the guide or a delegated specialist.
       if (!custom) await studio.pipelineAgent?.unload();
-      if (custom || (node.type !== 'agent' && studio.llama.modelId && studio.llama.modelId !== model.id)) await studio.llama.unload();
-      const facade = Object.assign(Object.create(studio), { config });
-      facade.assertModelMemory = target => assertMemory(studio, target, { customAgent: custom ? model : undefined });
+      else if (studio.pipelineAgent?.modelId && studio.pipelineAgent.modelId !== model.id) await studio.pipelineAgent.unload();
+      if (custom || (node.type !== 'agent' && studio.llama.modelId && studio.llama.modelId !== model.id)) await releaseSpecialist();
+      const facade = Object.assign(Object.create(studio), { config, sampleMemory: studio.sampleMemory?.bind(studio), loadedEngines: studio.loadedEngines?.bind(studio) });
+      facade.assertModelMemory = target => {
+        assertMemory(studio, target, { customAgent: custom ? model : undefined });
+        studio.assertModelMemory(target);
+      };
       facade.loadChat = async (target, loadSignal, change, toolCalling = false) => {
-        if (studio.llama.modelId && studio.llama.modelId !== target.id) await studio.llama.unload();
-        facade.assertModelMemory(target);
+        if (studio.llama.modelId && studio.llama.modelId !== target.id) await releaseSpecialist();
         await studio.loadChat.call(facade, target, loadSignal, change, toolCalling);
       };
       if (['chat', 'code'].includes(node.type)) {
@@ -208,8 +221,10 @@ export function createPipelineExecutor(studio) {
           text += token;
           if (text.length > responseLimit) throw new Error('Pipeline response exceeded the output limit. Reduce response tokens.');
           onUpdate({ phase: node.type === 'code' ? 'Generating code' : 'Generating response', text });
-        });
-        signal.throwIfAborted(); model.validation = 'Ran successfully';
+        }, usage => { if (usage.removedMessages > 0) onUpdate({ contextUsage: usage }); });
+        signal.throwIfAborted();
+        if (!text.trim()) throw new Error('The model returned no answer for this pipeline step. Try again or choose a different model.');
+        model.validation = 'Ran successfully';
         return { text, modelName: model.name };
       }
       const agentOutputs = new Set();
@@ -237,6 +252,8 @@ export function createPipelineExecutor(studio) {
           facade.registry = { ...studio.registry, models: studio.registry.models.filter(target => target.id !== guideId(studio)) };
           facade.loadOrchestrator = async (target, loadSignal, change) => {
             assertMemory(studio, target, { customAgent: target, specialist: false });
+            if (studio.sampleMemory) await studio.sampleMemory();
+            studio.assertModelMemory(target, { role: 'pipeline-agent' });
             await studio.pipelineAgent.load(target, studio.registry.runtimes.chat, loadSignal, change, config.context, true);
           };
         } else {
@@ -258,20 +275,21 @@ export function createPipelineExecutor(studio) {
         const message = { content: '', steps: job.children };
         facade.changed = () => {
           const steps = publicSteps(job.children || []);
-          onUpdate({ phase: job.phase || 'Agent working', text: String(message.content || '').slice(0, responseLimit), steps });
+          onUpdate({ phase: job.phase || 'Agent working', text: String(message.content || '').slice(0, responseLimit), steps, ...(message.contextUsage ? { contextUsage: message.contextUsage } : {}) });
           studio.changed();
         };
         facade.persist = async () => facade.changed();
         // Bound specialist text responses and honor this step's local configuration.
         facade.llama = Object.create(studio.llama);
-        facade.llama.unload = studio.llama.unload.bind(studio.llama);
-        facade.llama.generate = async (messages, settings, childSignal, token) => {
+        facade.llama.unload = releaseSpecialist;
+        facade.llama.release = releaseSpecialist;
+        facade.llama.generate = async (messages, settings, childSignal, token, onContext) => {
           let length = 0;
           await studio.llama.generate(messages, settings, childSignal, value => {
             length += value.length;
             if (length > responseLimit) throw new Error('Specialist response exceeded the output limit.');
             token(value);
-          });
+          }, onContext);
         };
         // Studio.loadChat writes to facade.llama; bind loading to the actual process.
         facade.llama.load = studio.llama.load?.bind(studio.llama);
@@ -283,8 +301,8 @@ export function createPipelineExecutor(studio) {
         model.validation = 'Ran successfully';
         return { text: message.content, steps: publicSteps(job.children), ...(artifact ? { artifact } : {}), modelName: model.name };
       }
-      await studio.llama.unload(); update('Loading media engine');
-      const settings = jobSettings({ prompt: node.prompt, settings: node.settings }, node.type);
+      await releaseSpecialist(); update('Loading media engine');
+      const settings = jobSettings({ prompt: node.prompt, settings: node.settings }, node.type, model);
       const result = await facade.generateMedia({ kind: node.type, model, runtime: studio.registry.runtimes[node.type], settings, input: inputs[0]?.file, workDir: studio.workDir, outputDir: studio.outputDir, id: randomUUID(), signal, onOutput: text => {
         const progress = realProgress(text, settings, model);
         onUpdate({ phase: progress === undefined ? 'Engine working' : `Processing · ${progress}%`, ...(progress === undefined ? {} : { progress: progress / 100 }) });

@@ -39,6 +39,25 @@ test('library and settings how-to requests retrieve only relevant instructions',
   assert.doesNotMatch(buildAppGuide({ request: 'How do I download models?' }), /Runs after/);
 });
 
+test('reference editing help distinguishes model capabilities and actual image controls', () => {
+  const request = 'How do I preserve identity using a reference photo in this application?';
+  assert.deepEqual(appGuideTopics(request), ['images']);
+  const guide = buildAppGuide({ request });
+  for (const label of ['Identity & editing', 'Photorealism', 'Use model', 'paperclip', 'Qwen Image Edit 2511 requires a photo']) assert.ok(guide.includes(label), label);
+  assert.match(guide, /one attached reference photo/);
+  assert.match(guide, /non-commercial research terms/);
+  assert.match(guide, /not been tested here/);
+  assert.ok(guide.length <= APP_GUIDE_MAX_CHARS);
+});
+
+test('default-model help explains saved choices and temporary selections', () => {
+  const guide = buildAppGuide({ request: 'Where do I choose my default model in Settings?' });
+  for (const label of ['START IN', 'MAIN AGENT MODEL', 'DEFAULT CHAT MODEL', 'DEFAULT CODE MODEL', 'Set as default']) assert.ok(guide.includes(label), label);
+  assert.match(guide, /"Select model" is temporary/);
+  assert.match(guide, /Saved unavailable models stay selected/);
+  assert.ok(guide.length <= APP_GUIDE_MAX_CHARS);
+});
+
 test('pipeline instructions describe actual editing and execution boundaries', () => {
   const guide = buildAppGuide({ request: 'How do I build a pipeline?' });
   for (const label of ['Pipelines', 'New pipeline', 'Add step', 'Local model', 'Instructions', 'Runs after', 'Run input', 'Run pipeline', 'Output', 'Pause after step', 'Resume', 'Memory after this step']) assert.ok(guide.includes(label), label);

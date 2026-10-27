@@ -2,6 +2,8 @@
 // Sizes and SHA256 values are pinned to immutable revisions; no model weights are bundled.
 // memoryGB is a conservative planning estimate at short context, not a hardware guarantee.
 // Qwen3's default uses Unsloth's quantization of the Apache-2.0 Qwen model.
+import { imageCatalogModels } from './image-catalog.mjs';
+
 export const catalogModels = Object.freeze([
   {
     "id": "qwen3-0.6b",
@@ -612,6 +614,7 @@ export const catalogModels = Object.freeze([
       }
     ]
   },
+  ...imageCatalogModels,
   {
     "id": "dreamshaper-8",
     "catalogId": "dreamshaper-8",
@@ -641,6 +644,10 @@ export const catalogModels = Object.freeze([
     "profile": {
       "family": "checkpoint",
       "args": {},
+      "inputMode": "img2img",
+      "requiresReference": false,
+      "width": 512,
+      "height": 512,
       "steps": 20,
       "cfg": 7
     }
@@ -651,6 +658,7 @@ export const catalogModels = Object.freeze([
     "name": "CyberRealistic 8",
     "kind": "image",
     "description": "Stable Diffusion 1.5 checkpoint for realistic portraits, fashion and photographic scenes. Start at 512 × 512. Requires an external image engine.",
+    "imageUseCases": ["photorealism"],
     "bestFor": [
       "Realistic portraits",
       "Fashion",
@@ -674,6 +682,10 @@ export const catalogModels = Object.freeze([
     "profile": {
       "family": "checkpoint",
       "args": {},
+      "inputMode": "img2img",
+      "requiresReference": false,
+      "width": 512,
+      "height": 512,
       "steps": 28,
       "cfg": 7.5
     }
@@ -684,6 +696,7 @@ export const catalogModels = Object.freeze([
     "name": "Juggernaut XL 9",
     "kind": "image",
     "description": "SDXL checkpoint for detailed photography, cinematic scenes and landscapes. Best near 1024-pixel resolution; needs more memory and an external image engine.",
+    "imageUseCases": ["photorealism"],
     "bestFor": [
       "Detailed photography",
       "Cinematic scenes",
@@ -707,11 +720,26 @@ export const catalogModels = Object.freeze([
     "profile": {
       "family": "checkpoint",
       "args": {},
+      "inputMode": "img2img",
+      "requiresReference": false,
+      "width": 1024,
+      "height": 1024,
       "steps": 35,
       "cfg": 5
     }
   }
-].map(model => Object.freeze({ ...model, bestFor: Object.freeze(model.bestFor), files: Object.freeze(model.files.map(file => Object.freeze(file))) })));
+].map(model => Object.freeze({
+  ...model,
+  bestFor: Object.freeze(model.bestFor),
+  ...(model.imageUseCases ? { imageUseCases: Object.freeze(model.imageUseCases) } : {}),
+  ...(model.requirements ? { requirements: Object.freeze(model.requirements) } : {}),
+  ...(model.profile ? { profile: Object.freeze({
+    ...model.profile,
+    args: Object.freeze(model.profile.args),
+    ...(model.profile.modelArgs ? { modelArgs: Object.freeze(model.profile.modelArgs) } : {})
+  }) } : {}),
+  files: Object.freeze(model.files.map(file => Object.freeze(file)))
+})));
 
 export const defaultOrchestratorId = 'qwen3-0.6b';
 const byId = new Map(catalogModels.map(model => [model.id, model]));
