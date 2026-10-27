@@ -6,6 +6,7 @@ These changes build on the 0.1.0 desktop alpha. No new release or version tag ha
 
 ### Added
 
+- A [contribution guide](CONTRIBUTING.md) covering development setup, validation, pull requests, model recipes, and useful bug reports.
 - Saved default models for Agent, Chat, Code, Image, Upscale, Video and Audio, plus a startup mode. Settings and the active engine panel's **Set as default** control let users choose their preferred models.
 - **Memory on this machine** in Model Library: total and available system RAM, planning room after a safety buffer, and loaded models with measured process RAM or labeled estimates. Specialists can be unloaded individually.
 - Multiple resident chat/code specialists alongside the persistent guide. Explicitly loaded models stay ready between jobs, and new loads are checked against available RAM and the estimated combined footprint.

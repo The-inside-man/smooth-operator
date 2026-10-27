@@ -6,6 +6,8 @@ TIM Studio is a desktop alpha for **Windows, macOS, and Linux**. Models can be d
 
 See the [changelog](CHANGELOG.md) for recent features, fixes, and validation limits.
 
+Contributions and bug reports are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) for setup, checks, model recipes, and the pull request process.
+
 ## Screenshots
 
 Interface previews use example data. The completed pipeline shows saved results from a real local run.
