@@ -4,6 +4,8 @@ A local AI workspace for downloading models, running agents, and building visual
 
 TIM Studio is a desktop alpha for **Windows, macOS, and Linux**. Models can be downloaded into its local data folder or referenced in place from an existing TIM library. Once the required models and engines are installed, inference runs locally.
 
+See the [changelog](CHANGELOG.md) for recent features, fixes, and validation limits.
+
 ## Screenshots
 
 Interface previews use example data. The completed pipeline shows saved results from a real local run.
@@ -12,7 +14,7 @@ Interface previews use example data. The completed pipeline shows saved results 
 
 ![TIM Studio welcome screen with Local AI, Agents at work, the resident guide, and workspace controls](docs/screenshots/local-ai-workspace.webp)
 
-**Model library** — explore the 25-model catalog, compare specialties and memory estimates, and manage local downloads.
+**Model library** — explore the model catalog, compare specialties and memory estimates, and manage local downloads.
 
 ![Model library showing downloadable AI models, their best uses, sizes, and memory estimates](docs/screenshots/model-library.webp)
 
@@ -61,15 +63,23 @@ Native packages must be validated on their own operating systems. `.github/workf
 
 The reusable [orchestrator agent specification](ORCHESTRATOR.md) documents its role, portable model instructions, application procedures, tool contract, and the steps for replacing and validating the guide with another local model. Selecting a replacement in TIM retains the runtime application guide; the Markdown is a repository handoff document rather than an automatically loaded prompt.
 
-Agent is the default entry mode. On a fresh setup, TIM installs **Qwen3 0.6B Q4_K_M** as the default guide and obtains a compatible llama.cpp chat engine when none is available. The guide's model download is about **397 MB**, with an estimated **1.6 GB** working memory at its fixed 4,096-token context. This is a planning estimate, not a guarantee of total process memory or model quality. The guide helps explain model strengths, memory needs and suitable specialists. Settings can select a different compatible **Main agent model**.
+Agent is the initial entry mode; Settings can save a different startup mode. On a fresh setup, TIM installs **Qwen3 0.6B Q4_K_M** as the default guide and obtains a compatible llama.cpp chat engine when none is available. The guide's model download is about **397 MB**, with an estimated **1.6 GB** working memory at its fixed 4,096-token context. This is a planning estimate, not a guarantee of total process memory or model quality. The guide helps explain model strengths, memory needs and suitable specialists. Settings can select a different compatible **Main agent model**. Your selected agent is kept across restarts and rescans, including when its files or runtime are temporarily unavailable; TIM reports the issue instead of replacing it with the starter guide.
 
-The guide runs in its own CPU process, uses at most four threads and stays loaded while a specialist runs. A separate process loads a chosen chat/code specialist into memory. Before media work, that specialist is unloaded to free memory; the guide remains available for synthesis. Catalog memory estimates include room to plan around the guide, and oversized catalog models are rejected using the computer's total memory. Available free memory and actual engine overhead can still cause a load to fail.
+The guide runs in its own CPU process, uses at most four threads and stays loaded while specialists work. Multiple chat/code models can be preloaded into separate processes when RAM permits; manually loaded models stay ready between jobs until explicitly unloaded or engine settings change. Automatic cleanup releases temporary specialists. Inference still runs one task at a time.
+
+Model Library's **Memory on this machine** section shows total and available system RAM, a planning budget after a safety buffer, and each loaded model. It labels measured process RAM (RSS) separately from model estimates, and provides an **Unload** action for each specialist. macOS availability includes an estimate of reclaimable memory. New loads are checked against current available RAM and the estimated combined model footprint. Context size, GPU allocation and other apps can still cause loads to fail; process RAM does not include dedicated GPU VRAM.
 
 Agent loads enable `--jinja`, as required by the [llama.cpp function-calling documentation](https://github.com/ggml-org/llama.cpp/blob/master/docs/function-calling.md). A manually supplied engine must support this flag and the selected model must have a compatible template; no custom template is downloaded.
 
 An agent turn can call available registered chat/code, image, video, upscale and transcription specialists, then synthesize their actual returned text and artifact metadata. One specialist runs at a time inside the parent queue slot. Only attachments from the current turn and that turn's generated artifact IDs can be used as tool inputs. The conversational model has no shell, arbitrary-file, cloud or network tool; downloads are managed separately by the application. The agent cannot visually inspect generated images/videos or hear audio; the UI labels this limitation.
 
-Settings bound each turn to 1–8 specialist calls (default 4) and 30–1800 seconds (default 600). Cancel applies to the whole turn, including the current specialist. Malformed or unavailable tool calls fail visibly; engine failures return structured errors to the main model. Completed child artifacts remain visible when a later step fails. Interrupted turns are not replayed on restart. Long conversations or results can still exceed a model's context window and fail; automatic context compaction is not implemented.
+Settings bound each turn to 1–8 specialist calls (default 4) and 30–1800 seconds (default 600). Cancel applies to the whole turn, including the current specialist. Malformed or unavailable tool calls fail visibly; engine failures return structured errors to the main model. Completed child artifacts remain visible when a later step fails. Interrupted turns are not replayed on restart.
+
+Choose the model in **Select model**, then **Set as default** in the active engine panel to save it for that mode and open that mode at the next launch. **Settings → Your default models** lets you choose **Start in**, the **Main agent model**, and separate defaults for Chat, Code, Image, Upscale, Video, and Audio. Switching a model for one task does not change its default. Saved unavailable choices require attention instead of silently switching to a smaller model. Saving a direct model default does not load or unload models.
+
+TIM counts the formatted prompt with the local engine's tokenizer and reserves room for the requested reply. When needed, it leaves older complete conversation turns out of the model request and shows a notice. Saved history, the latest request, and the active tool-call/result chain stay intact; history is not summarized. If the latest request still cannot fit, TIM explains how to increase **Context tokens**, lower **Response tokens**, or provide less source. Older engines without token-counting APIs use bounded retries only after explicit context errors. Context settings apply to Chat/Code specialists and pipeline model steps; the resident guide keeps its fixed 4,096-token window. Larger windows use more memory.
+
+Chat/Code and delegated text specialists request direct answers with thinking disabled where the model template supports it. Empty answers, exhausted response budgets, and interrupted response streams fail visibly; any partial output is retained. A context notice describes omitted history and does not indicate that an answer was generated. If a response reaches its token limit, increase **Response tokens** while leaving enough **Context tokens** for both the prompt and reply, or shorten the request.
 
 TIM receives a versioned application guide from `server/app-guide.mjs`. Help questions retrieve concise instructions for the relevant controls: pipeline creation, model downloads and memory, Chat, or Settings. For application help, the guide receives the current manual and bounded user context instead of the full model catalog or outdated assistant guesses; it is offered no execution tools. Normal model recommendations and explicit specialist delegation retain their existing routes. Live application facts are limited to counts and status, without copying private pipeline instructions, paths, or conversations into the manual. The guide can explain controls but cannot click the interface or create/run saved pipelines from chat.
 
@@ -79,11 +89,26 @@ Automated validation uses mocked model responses and temporary local fixtures. A
 
 ## Browse, download and load models
 
-Model Library includes an offline catalog of **25 models**: five Qwen3 assistants, ten Qwen2.5 general/chat and coding assistants, seven Whisper speech-to-text variants, and three image checkpoints (DreamShaper 8, CyberRealistic 8 and Juggernaut XL 9). Each entry describes what it is good for, parameter size or architecture, quantization, download size, estimated memory, license and a link to its source. Search and filters work before a local library is connected. The catalog is curated and bundled with the app; it is not a live search of every model online.
+Model Library includes an offline catalog of **31 models**: five Qwen3 assistants, ten Qwen2.5 general/chat and coding assistants, seven Whisper speech-to-text variants, and nine image choices. Each entry describes its best uses, quantization, total download size, estimated memory, license and source. **Photorealism** and **Identity & editing** filters help choose image models. The catalog is curated and bundled with the app; it is not a live search of every model online.
+
+The image choices include:
+
+| Model | Best uses | Estimated RAM at 1024 × 1024 | Reference photo |
+| --- | --- | --- | --- |
+| [FLUX.2 Klein 4B Fast](https://huggingface.co/black-forest-labs/FLUX.2-klein-4B) | Four-step photographs, products and reference edits | 12 GiB | Optional |
+| [FLUX.2 Klein 4B Base](https://huggingface.co/black-forest-labs/FLUX.2-klein-base-4B) | Longer generation and editing experiments | 12 GiB | Optional |
+| [Qwen Image 2.1](https://huggingface.co/Qwen/Qwen-Image-2.1) | Realistic portraits, subject consistency and product edits | 20 GiB | Optional; non-commercial research license |
+| [Qwen Image 2512](https://huggingface.co/Qwen/Qwen-Image-2512) | Text-to-image photography and detailed text | 28 GiB | Text only |
+| [Qwen Image Edit 2511](https://huggingface.co/Qwen/Qwen-Image-Edit-2511) | Reference-based portrait and identity-consistent edits | 28 GiB | Required |
+| [RealVisXL 5.0](https://huggingface.co/SG161222/RealVisXL_V5.0) | SDXL photographs and portraits | 12 GiB | Optional img2img |
+
+DreamShaper 8, CyberRealistic 8 and Juggernaut XL 9 remain available. Download sizes include each bundle's required encoders, vision projector and VAE. Identity consistency is best-effort: use an editing model and attach one reference photo per image job. Ordinary img2img or a fixed seed does not guarantee the same face. Cards link to both the weight source and publisher terms, including Qwen Image 2.1's separate non-commercial research license.
+
+These recipes and file metadata were checked against publisher cards and stable-diffusion.cpp documentation. A recent compatible image engine is required; image inference for the new bundles has not been tested on this Mac. Memory figures are planning estimates before the resident guide and system headroom, and larger images need more memory.
 
 Choose **Download** to save a model to this computer. Downloads show progress, support cancellation and keep partial files for a resumable retry. Interrupted downloads stay paused after restart until retried. The app checks the pinned Hugging Face revision, expected byte count and SHA256 before exposing an installed model. Multi-file GGUF models become available only after all shards are verified. Errors such as a network interruption, checksum mismatch or full disk are shown in the download state.
 
-Installed chat and code models can be loaded into memory from the library and unloaded when finished. Media models load when a corresponding task runs. The default guide stays loaded independently. Downloading an image checkpoint or Whisper model installs its weights; it still needs a matching external image or Whisper engine pack. Automatic engine installation currently covers **chat only**. Additional image-editing bundles, video and upscaling continue to use external TIM engine/model bundles and their existing recipes.
+Installed chat and code models can be loaded into memory from the library and unloaded when finished. Media models load when a corresponding task runs. The default guide stays loaded independently. Image bundles include their model components and still need a matching external image engine pack; Whisper needs a speech engine. Automatic engine installation currently covers **chat only**. Video and upscaling continue to use external TIM bundles and their existing recipes.
 
 First-time guide setup needs an internet connection. The catalog stays visible if setup fails; retry setup or a model download after correcting the reported issue. Once the required engines and models are installed, inference runs locally without a network connection. Set `TIM_AUTO_SETUP=0` before starting the app to disable automatic guide setup, for example during offline validation.
 
@@ -116,7 +141,7 @@ Pipeline agents have the same bounded registered specialist tools as conversatio
 - Single-window chat and code generation with streaming responses.
 - Local sessions, text/code attachments, session export, and editable system prompt, temperature, response length, and context size.
 - A searchable online-download catalog with model specialties, size/memory guidance, progress, cancellation, resumable retry and verified local installation.
-- A default lightweight guide that stays loaded alongside a specialist, plus explicit chat/code model loading and unloading.
+- A user-selectable persistent guide, saved per-mode defaults and startup choice, plus explicit loading and unloading of multiple chat/code specialists when memory permits.
 - A graphical local pipeline builder with model-specific steps, agent delegation, memory policies, live run details, saved definitions, JSON import/export, pause/resume, and cancellation.
 - Existing-library model discovery, missing-companion diagnostics, model selection, and explicit runtime selection.
 - Image generation and image-to-image/reference editing recipes for known SD, FLUX.2, and Qwen bundles.
@@ -183,6 +208,8 @@ npm run dist
 
 `npm run test:pipelines-ui` checks the graph editor and run controls with browser fixtures. `npm run smoke:pipelines` explicitly runs the five-step **Build & review locally** example using the already installed small guide and coding model; it saves the recipe and run history in `TIM-Studio-Data` and downloads no weights.
 
+`npm run test:defaults-ui` checks saved default models, independent Chat/Code choices, startup mode, missing-model feedback, and Settings on narrow screens with isolated browser fixtures. It does not change your model settings or load weights.
+
 Build on the target operating system. `Start-Mac.command` and `Start-Linux.sh` launch local packages if present and otherwise use the development environment. On Linux, run `sh Start-Linux.sh` if the drive does not retain executable bits; native binaries still need a mount that permits execution.
 
 On a fresh Mac checkout, open `Start-Mac.command` with Node.js 24+ installed. If no matching packaged app is present, the launcher installs missing development dependencies and the Electron runtime before building and opening the app. This first-time setup needs an internet connection. The app then prepares its default guide and chat engine; additional models can be downloaded from Model Library. Media engines remain separate.
@@ -190,12 +217,13 @@ On a fresh Mac checkout, open `Start-Mac.command` with Node.js 24+ installed. If
 ## Catalog and guide validation on October 26, 2026
 
 - Catalog entries were checked against publisher model cards and Hugging Face metadata for exact filenames, immutable revisions, byte sizes, SHA256 values and licenses.
-- All 135 automated tests passed, including application-guide retrieval and help-only tool boundaries, catalog integrity and resumable downloads, strict native tool calls, specialist source context, graph validation, ancestor data flow, model reuse, memory admission, shared queue serialization, manual-load/resume coordination, cancellation and explicit restart recovery. Test fixtures use tiny local byte streams and mocked model responses; they do not download real weights.
+- All 253 automated tests passed, including saved model defaults and unavailable-model preservation, empty/truncated response handling, application-guide retrieval and help-only tool boundaries, catalog integrity and resumable downloads, strict native tool calls, specialist source context, graph validation, ancestor data flow, model reuse, memory admission, shared queue serialization, manual-load/resume coordination, cancellation and explicit restart recovery. Test fixtures use tiny local byte streams and mocked model responses; they do not download real weights.
 - Startup trusts the app's verification receipt for unchanged local files and rechecks hashes when file metadata changes. Existing-library discovery remains independent of these receipts.
 - A real Mac run downloaded and verified Qwen3 0.6B and Qwen2.5 Coder 0.5B, obtained a coding recommendation, delegated a Python task through a native structured tool call and returned the specialist's code. The same guide process stayed resident throughout specialist loading and execution. Observed resident memory was about 1.45 GiB for the guide and 0.63 GiB for the coding process; these are one-machine observations, not limits.
 - A clean automatic download of the pinned official Mac arm64 chat runtime passed checksum verification, extraction and executable startup after its temporary files were removed.
 - The lightweight guide receives a task-relevant catalog shelf for recommendations. Direct requests such as “use the coding specialist” use a concise dispatch prompt and require an actual call to the matching registered function on the first step; a missing call fails visibly. Specialists also receive bounded original source context. These checks do not establish universal routing reliability.
 - The pipeline browser check passed graph editing, connections, import/export, uploads, live output, pause/resume/cancel, interruption history, and responsive layouts. Unsaved work survives switching to Chat; selecting a pipeline queue job opens that exact run. The desktop startup and isolated preload check also passed on Mac.
+- Model-library and saved-default browser checks cover live memory, independent Chat/Code preferences, startup selection, missing-model feedback, external model-card links and narrow Settings layouts. These checks use isolated fixtures without changing user settings or loading weights.
 - The installed Qwen3 0.6B guide answered the reported "guild a pipeline" question with the actual builder controls, explained the complete model download/load workflow, and accurately stated its lack of direct interface control. This real check used isolated conversations, no model downloads, the same resident guide process, and no specialist execution. It validates these examples rather than guaranteeing every answer from a small model.
 - Complete packaged-app first-run setup and real-model validation of the new catalog/guide features on Windows and Linux remain pending. Native startup and packaging results are reported separately above. The Windows inference evidence below predates these features and remains evidence for the earlier adapters only.
 
@@ -216,6 +244,8 @@ Test outputs and raw screenshots are under `artifacts/`, excluded from source co
 `src/` holds the React/TypeScript interface, including the interactive pipeline workspace. `desktop/` owns the Electron window and limited native file-dialog bridge. `server/` provides a loopback-only API, bundled model catalog, verified downloads, portable runtime setup/resolution, separate guide and specialist chat processes, a serialized inference queue, atomic JSON storage, and engine adapters. `server/pipelines.mjs` validates and persists dependency graphs and run snapshots; `server/pipeline-executor.mjs` runs their steps inside the existing inference queue with local settings and model-memory controls. Model-generated text is rendered as text/code, not executable HTML. Native processes receive argument arrays rather than shell command strings.
 
 Backend integrations are replaceable, which leaves a defined place for RedMars when its runtime contract is ready.
+
+`server/llama-pool.mjs` manages resident specialist processes, `server/memory.mjs` samples host/process memory, and `server/context.mjs` preserves current requests while budgeting older conversation history. The runtime application manual is maintained in `server/app-guide.mjs`; the portable behavioral specification is [ORCHESTRATOR.md](ORCHESTRATOR.md).
 
 ## License
 

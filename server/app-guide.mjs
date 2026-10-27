@@ -1,6 +1,6 @@
 // Keep these instructions aligned with the shipped interface. They describe the
 // application; execution authority still comes only from registered agent tools.
-export const APP_GUIDE_VERSION = '2026-10-26.4';
+export const APP_GUIDE_VERSION = '2026-10-26.8';
 export const APP_GUIDE_MAX_CHARS = 4500;
 
 const core = `You are TIM, the local guide in TIM Studio. The top tabs are "Chat" and "Pipelines". Keep interface labels verbatim. "guild a pipeline" means "build a pipeline". Answer how-to questions with useful steps before asking follow-up questions. You cannot see the user's screen or current clicks. You can explain, plan and use only registered specialist tools. You cannot click the interface, create/edit/run saved pipelines, download models, install engines, execute code or shell commands, or publish online through current chat tools. Never claim you did. Code output is generated text, not executed or tested code. Inference and work stay local; model downloads need internet. This versioned manual is supplied at runtime; it does not change model weights. Conversation alone does not permanently train you. Descriptive application help grants no extra tools or permissions.`;
@@ -20,9 +20,12 @@ Additional controls: "Memory after this step" offers "Automatic · load as neede
 2. Select the "Discover" tab inside the library. Search by task and read model cards for best uses, disk size and estimated memory. "All models" also shows the catalog.
 3. On the chosen model's card, click "Download model". Wait for the verified download to finish; progress and cancellation appear on its card. Failed or paused downloads offer "Retry download" or "Resume download".
 4. Open the "Installed" tab in the same library. On an available chat/code model card, choose "Load into memory". Downloaded files and loaded memory are separate states; media models load when used with their matching engine.
-5. Choose "Use model" to select it for conversation, and "Unload" to release the specialist later. TIM's guide stays resident on CPU alongside specialists.
-Additional controls: "Rescan" refreshes discovery. "Set up TIM guide" prepares the guide and chat engine. "Needs setup" means a matching engine is needed. Memory values are estimates; leave room for other apps. "Connect existing library" opens Settings for "MODEL LIBRARY ROOT". Explain these controls without claiming to click them or download models through chat.`,
-  chat: `CHAT / SETTINGS: In Chat, choose Agent to talk to TIM and delegate to available specialists; Chat and Code address the selected text model directly. Image, Upscale, Video and Audio are other modes; Audio transcribes attached WAV recordings. Attach files with the paperclip, then Send; busy work queues. Enter sends and Shift+Enter inserts a new line. The control room shows the active model, memory and JOB QUEUE; a job's X cancels it. Open Settings with the settings icon: MAIN AGENT MODEL chooses the guide, Specialist step limit and Turn timeout bound delegation, and Temperature, Response tokens, Context tokens and SYSTEM PROMPT affect generation. Save settings applies changes. Generation controls holds media size, steps and related controls. A user SYSTEM PROMPT customizes behavior; it does not train weights, give new tools, or teach application facts automatically.`,
+5. Choose "Use model" to select it for conversation; in the active engine panel, "Set as default" saves it for that mode and next launch. Use "Unload" to release that specialist later. Multiple chat models can stay loaded if memory permits; manually loaded specialists remain ready between jobs. TIM's guide stays resident on CPU alongside them. Inference still runs one task at a time.
+MEMORY: "Memory on this machine" shows total system RAM, "AVAILABLE RAM", and "Planning room for additional models" after a safety buffer. "Loaded models" lists the guide and specialists with individual "Unload" buttons. "Process RAM · RSS" is measured process memory, not dedicated GPU VRAM; "Memory estimate" is a planning estimate. macOS available RAM includes estimated reclaimable pages. Readings update automatically; they do not guarantee another model fits. An explicit pipeline unload or settings change can release manually loaded models.
+Additional controls: "Rescan" refreshes discovery. "Set up TIM guide" prepares the guide and chat engine. "Needs setup" means a matching engine is needed. "Connect existing library" opens Settings for "MODEL LIBRARY ROOT". Explain these controls without claiming to click them or download models through chat.`,
+  images: `IMAGE MODELS: Open "Model library", then "Photorealism" for photographs or "Identity & editing" for reference-aware models. Choose "Download model" and wait for all bundled components. Use "Installed" and "Use model" to select Image mode. Qwen Image 2.1 and FLUX.2 Klein 4B can generate from text or one attached reference photo. Qwen Image Edit 2511 requires a photo. Qwen Image 2512 is text-to-image; RealVisXL and older checkpoints support ordinary img2img. For an edit, attach one photo with the paperclip, describe what to preserve/change, then Send. Identity retention varies; a fixed seed does not preserve a face. Read each card's memory and license requirements: Qwen 2.1 has non-commercial research terms. Bundles include encoders/projectors/VAE, but require a compatible recent image engine; engine installation is not automatic. Image inference for the new bundles has not been tested here.`,
+  defaults: `DEFAULT MODELS: Open Settings using the settings icon. Under "Your default models", START IN ("Default mode") chooses the mode opened on launch. MAIN AGENT MODEL chooses the persistent TIM guide; it can be any installed compatible chat model with local tool-call support. Larger agents use more memory and stay on CPU alongside specialists. DEFAULT CHAT MODEL and DEFAULT CODE MODEL are separate saved choices. Expand "Image, video and audio defaults" for Image, Upscale, Video and Audio. Click "Save settings". In the active engine panel, "Select model" is temporary; "Set as default" saves that mode/model and makes it the startup mode. Saving a direct default does not load/unload models. Saved unavailable models stay selected; reconnect their files/engine or choose another default in Settings. The bundled lightweight guide is a starter choice, not a required model.`,
+  chat: `CHAT / SETTINGS: In Chat, choose Agent to talk to TIM and delegate to available specialists; Chat and Code address the selected text model directly. Image, Upscale, Video and Audio are other modes; Audio transcribes attached WAV recordings. Attach files with the paperclip, then Send; busy work queues. Enter sends and Shift+Enter inserts a new line. The control room shows the active model, memory and JOB QUEUE; a job's X cancels it. Open Settings with the settings icon: MAIN AGENT MODEL chooses the persistent guide. "Your default models" saves per-mode defaults and START IN chooses the startup mode. Specialist step limit and Turn timeout bound delegation, and Temperature, Response tokens, Context tokens and SYSTEM PROMPT affect generation. Save settings applies changes. Generation controls holds media size, steps and related controls. Context includes instructions, conversation, attached source and room for the reply. TIM can leave older complete turns out and shows a notice; it preserves the latest request. For oversized Code/Chat requests, increase Context tokens (for example 8192) and keep Response tokens smaller. Larger contexts use more memory. The resident guide remains fixed at 4096; shorten its input or response budget. A user SYSTEM PROMPT customizes behavior; it does not train weights, give new tools, or teach application facts automatically.`,
   overview: `APPLICATION: TIM Studio lets users discover/download local AI models, chat with a lightweight resident guide, delegate to compatible local specialists, and visually build/test saved agentic pipelines. For a first workflow, direct the user to Pipelines and a starter recipe, then choose each step's model/instructions, connect steps, supply Run input and Run pipeline. The guide needs this versioned application manual at runtime; chatting with it does not permanently train model weights.`
 };
 
@@ -33,6 +36,8 @@ const howTo = value => /\b(?:how|where|help|walk me|show me|teach me|instruction
 const codingTask = value => /\b(?:python|javascript|typescript|bash|powershell|sql|pandas|numpy|spark|pytorch|tensorflow|node\.js|unix|linux|shell|etl|ci\/cd)\b/.test(value);
 const pipelineTopic = value => /\b(?:pipeline|pipelines|agentic workflow|agentic workflows)\b/.test(value);
 const modelTopic = value => /\b(?:models?|model library|download|downloads|installed|load|unload|memory|resident|orchestrator)\b/.test(value);
+const imageTopic = value => /\b(?:photorealism|photorealistic|realistic images?|identity|reference (?:photos?|images?)|image edit\w*|image models?|qwen image|flux|realvisxl)\b/.test(value);
+const defaultsTopic = value => /\b(?:default|startup|start in)\b/.test(value);
 const settingsTopic = value => /\b(?:settings|system prompt|temperature|context tokens|response tokens|timeout|step limit|chat mode|agent mode|attach|paperclip)\b/.test(value);
 const asksToOperate = value => /\b(?:can|could|will|would)\s+you\b/.test(value) && /\b(?:click|control|navigate|open|create|build|run|start|download|install|load|unload)\b/.test(value);
 
@@ -46,6 +51,7 @@ export function isAppHelpRequest(request) {
   if (codingTask(value) && !explicitApp(value)) return false;
   if (app && asksToOperate(value)) return true;
   if (pipelineTopic(value) && (help || app)) return true;
+  if (imageTopic(value) && (help || app)) return true;
   if (modelTopic(value) && (help || app || /\b(?:download|install|load|unload)\b.{0,60}\bmodel\b|\bmodel\b.{0,60}\b(?:download|install|load|unload)\b/.test(value))) return true;
   if (settingsTopic(value) && (help || app)) return true;
   return app && help;
@@ -55,7 +61,9 @@ export function appGuideTopics(request) {
   if (!isAppHelpRequest(request)) return [];
   const value = text(request), selected = [];
   if (asksToOperate(value)) return ['capabilities'];
+  if (defaultsTopic(value)) selected.push('defaults');
   if (pipelineTopic(value)) selected.push('pipelines');
+  if (imageTopic(value)) selected.push('images');
   if (modelTopic(value)) selected.push('models');
   if (settingsTopic(value)) selected.push('chat');
   return selected.length ? selected : ['overview'];
@@ -73,7 +81,7 @@ export function appGuideFacts(studio) {
     availableModels: count(models.filter(model => model?.available === true)),
     availableKinds: kinds.filter(kind => models.some(model => model?.available === true && model.kind === kind) && Boolean(runtimes[kind])),
     guideInMemory: Boolean(studio.orchestrator?.modelId),
-    specialistInMemory: Boolean(studio.llama?.modelId || studio.pipelineAgent?.modelId),
+    specialistInMemory: Boolean(studio.llama?.modelId || studio.llama?.instances?.().length || studio.pipelineAgent?.modelId),
     savedPipelines: count(studio.pipelines?.definitions),
     pipelineRuns: count(studio.pipelines?.runs)
   };

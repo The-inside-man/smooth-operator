@@ -199,7 +199,7 @@ export class PipelineManager {
     for (const node of run.definition.nodes) if (this.validateModel && node.type !== 'input' && run.nodeRuns.find(step => step.nodeId === node.id)?.status !== 'completed') await this.validateModel(copy(node));
     if (run.status !== originalStatus || this.executing.has(id)) throw new Error('Pipeline changed while preparing to resume.');
     run.status = 'queued'; delete run.error; delete run.pauseRequested; delete run.cancelRequested; delete run.finishedAt;
-    for (const step of run.nodeRuns) if (step.status !== 'completed') { step.status = 'pending'; step.phase = 'Waiting'; delete step.error; delete step.text; delete step.artifact; delete step.steps; delete step.startedAt; delete step.finishedAt; delete step.progress; }
+    for (const step of run.nodeRuns) if (step.status !== 'completed') { step.status = 'pending'; step.phase = 'Waiting'; delete step.error; delete step.text; delete step.artifact; delete step.steps; delete step.startedAt; delete step.finishedAt; delete step.progress; delete step.contextUsage; }
     await this.changed(); return run;
   }
 
@@ -285,6 +285,14 @@ export class PipelineManager {
           if (typeof update.phase === 'string') step.phase = update.phase.slice(0, 300);
           if (typeof update.text === 'string') step.text = update.text.slice(0, PIPELINE_LIMITS.result);
           if (Number.isFinite(update.progress)) step.progress = Math.max(0, Math.min(1, update.progress));
+          if (plain(update.contextUsage)) {
+            const usage = update.contextUsage;
+            if (['removedMessages', 'contextTokens', 'responseTokens'].every(key => Number.isSafeInteger(usage[key]) && usage[key] >= 0)) step.contextUsage = {
+              removedMessages: usage.removedMessages, contextTokens: usage.contextTokens, responseTokens: usage.responseTokens,
+              promptTokens: Number.isSafeInteger(usage.promptTokens) && usage.promptTokens >= 0 ? usage.promptTokens : null,
+              method: String(usage.method || '').slice(0, 40)
+            };
+          }
           if (update.steps !== undefined || update.modelName !== undefined) {
             const details = resultValue({ text: '', steps: update.steps, modelName: update.modelName });
             if (details.steps !== undefined) step.steps = details.steps;

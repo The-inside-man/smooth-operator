@@ -1,10 +1,11 @@
 import { spawn } from 'node:child_process';
 import { runtimeEnv } from './platform.mjs';
-export function runProcess(binary, args, { signal, cwd, onOutput = () => {}, timeout = 30 * 60 * 1000 } = {}) {
+export function runProcess(binary, args, { signal, cwd, onOutput = () => {}, onProcess = () => {}, timeout = 30 * 60 * 1000 } = {}) {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) return reject(new Error('Cancelled'));
     let tail = '', timedOut = false;
     const child = spawn(binary, args, { cwd, windowsHide: true, shell: false, env: runtimeEnv(binary, cwd), stdio: ['ignore', 'pipe', 'pipe'] });
+    onProcess(child);
     const kill = () => child.kill('SIGKILL');
     const timer = setTimeout(() => { timedOut = true; kill(); }, timeout);
     signal?.addEventListener('abort', kill, { once: true });

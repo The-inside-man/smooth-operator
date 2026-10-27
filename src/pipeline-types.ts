@@ -1,4 +1,4 @@
-import type { AgentStep, Artifact } from './types';
+import type { AgentStep, Artifact, ContextUsage } from './types';
 
 export type PipelineNodeType = 'input' | 'agent' | 'chat' | 'code' | 'image' | 'video' | 'upscale' | 'transcribe' | 'load' | 'unload';
 export type PipelineMemoryPolicy = 'auto' | 'keep' | 'unload';
@@ -38,6 +38,7 @@ export type PipelineNodeRun = {
   jobId?: string;
   modelId?: string;
   modelName?: string;
+  contextUsage?: ContextUsage;
   logs?: Array<string | { message?: string; text?: string; at?: string }>;
 };
 export type PipelineRun = {

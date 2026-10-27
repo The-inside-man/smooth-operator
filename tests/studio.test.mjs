@@ -27,9 +27,12 @@ test('atomic storage survives concurrent writes with the last state intact', asy
 });
 test('running process is terminated on cancellation', async () => {
   const controller = new AbortController();
-  const running = runProcess(process.execPath, ['-e', 'setInterval(()=>{},1000)'], { cwd: process.cwd(), signal: controller.signal });
+  let child;
+  const running = runProcess(process.execPath, ['-e', 'setInterval(()=>{},1000)'], { cwd: process.cwd(), signal: controller.signal, onProcess: value => { child = value; } });
+  assert.ok(Number.isInteger(child.pid) && child.pid > 0, 'Media memory tracking receives the real engine process');
   setTimeout(() => controller.abort(), 100);
   await assert.rejects(running, /Cancelled/);
+  assert.ok(child.signalCode || child.exitCode !== null);
 });
 test('queue serializes inference, cancels waiting jobs, and saves the result', async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'tim-queue-'));

@@ -8,8 +8,9 @@ try {
   const page = await desktop.firstWindow();
   const errors = []; page.on('pageerror', e => errors.push(e.message));
   await page.locator('.statusbar').filter({ hasText: 'CONNECTED' }).waitFor({ timeout: 30000 });
-  const isolation = await page.evaluate(() => ({ node: typeof window.require, bridge: typeof window.timDesktop?.pickLibrary }));
-  if (isolation.node !== 'undefined' || isolation.bridge !== 'function') throw new Error('Preload isolation failed');
+  const isolation = await page.evaluate(() => ({ node: typeof window.require, bridge: typeof window.timDesktop?.pickLibrary, modelLinks: typeof window.timDesktop?.openExternal }));
+  if (isolation.node !== 'undefined' || isolation.bridge !== 'function' || isolation.modelLinks !== 'function') throw new Error('Preload isolation failed');
+  if (await page.evaluate(() => window.timDesktop.openExternal('file:///tmp/not-a-model-link')) !== false) throw new Error('Model links must reject local files');
   if (!uiOnly) {
     await page.getByText('TIM CONNECTED', { exact: true }).waitFor({ timeout: 30000 });
     await page.getByLabel('Message', { exact: true }).fill('Reply with exactly: Neon Terminal online.');
