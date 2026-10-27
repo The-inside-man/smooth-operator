@@ -15,6 +15,7 @@ These changes build on the 0.1.0 desktop alpha. No new release or version tag ha
 
 ### Changed
 
+- CI model-loading fixtures use deterministic memory and bounded startup waits, so slow native probes or low-memory runners report failures instead of waiting indefinitely. Windows image tests use native paths. Automated tests and workflow jobs also have time limits; newer runs replace older runs for the same source branch.
 - Saved defaults survive restarts and rescans. Missing model files or runtimes produce actionable feedback instead of silently replacing the selected model with a smaller one.
 - Prompt budgeting uses the local engine's tokenizer where supported, reserves space for the reply, and omits older complete turns when necessary. The latest request, active tool-call chain and saved conversation remain intact; a notice explains omitted history. Oversized current requests receive guidance instead of being shortened. Older engines use bounded retries after explicit context errors.
 - Chat, Code and delegated text specialists request direct answers with thinking disabled where supported. Empty responses, exhausted reply budgets and interrupted streams fail visibly, with partial output retained. Previously saved empty completions display an explanatory message.
@@ -22,7 +23,7 @@ These changes build on the 0.1.0 desktop alpha. No new release or version tag ha
 
 ### Validation and limits
 
-- All **253 automated tests**, the production build, isolated browser checks for model defaults, Model Library and pipelines, and the Mac development desktop startup/preload check passed. These checks do not establish packaged-app or real-model inference compatibility on every platform.
+- All **256 automated tests**, the production build, isolated browser checks for model defaults, Model Library and pipelines, and the Mac development desktop startup/preload check passed. These checks do not establish packaged-app or real-model inference compatibility on every platform.
 - Memory readings and model estimates aid planning; context size, other apps and GPU allocation affect actual capacity. Process RAM does not include dedicated GPU VRAM. Inference remains sequential even when several models are loaded.
 - New image recipes and download metadata were checked against publisher information and engine documentation; native inference for these bundles has not been validated here. A compatible image engine is still required. Identity preservation is best-effort, and individual model licenses apply, including Qwen Image 2.1's non-commercial research terms.
 - Code steps generate text. Agents still have no arbitrary filesystem access, shell execution or automated run/test/fix tools.
