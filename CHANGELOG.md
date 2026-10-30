@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased - TIM terminal workspace
+
+- Add the independently installable `tim` full-screen CLI, responsive faceless ASCII artwork, tracked subtitles and bright double-line borders.
+- Reuse the local session/model API through an owned loopback backend with automatic guide setup disabled; attaching to an existing backend preserves its ownership.
+- Add reviewed local utility/package-manager execution, metadata-verified model-assisted installation, bounded TCP/UDP listeners and offline TShark hex/ASCII packet views.
+- Add user-selected persistent toolbox storage, centralized recall before script proposals, versioned drafts, permission/source-bound approval, and locked atomic audit updates.
+- Document supported operations and limitations in [CLI.md](CLI.md). Initial implementation passed 61 fixture tests and an isolated Windows package install; integrated-main checks are reported in the draft PR. Real inference, target package installs and external/live capture are not part of this validation.
+
+
 ## Unreleased — 2026-10-26
 
 These changes build on the 0.1.0 desktop alpha. No new release or version tag has been published.

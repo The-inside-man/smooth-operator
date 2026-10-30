@@ -47,16 +47,18 @@ export class Studio extends EventEmitter {
     this.downloads = new DownloadManager(dataDir, { onChange: jobs => this.downloadChanged(jobs) });
     this.pipelines = new PipelineManager(dataDir, { executeStep: createPipelineExecutor(this), validateModel: node => validatePipelineModel(this, node), onChange: () => this.pipelineChanged() });
   }
-  async init() {
+  async init({ telemetry = true, libraryRoot } = {}) {
     await Promise.all([this.workDir, this.outputDir, this.uploadDir].map(d => fs.mkdir(d, { recursive: true })));
     this.config = { ...defaults, ...await this.store.read('settings', {}) };
+    if (libraryRoot !== undefined) this.config.libraryRoot = libraryRoot;
     this.sessions = await this.store.read('sessions', []);
     this.jobs = await this.store.read('jobs', []);
     await this.downloads.init();
     await this.pipelines.init();
     for (const j of this.jobs) if (['queued', 'running'].includes(j.status)) { j.status = 'interrupted'; j.phase = 'Interrupted when the app closed. Submit again to retry.'; const m = this.sessions.find(s => s.id === j.sessionId)?.messages.find(m => m.jobId === j.id); if (m) m.status = 'interrupted'; for (const child of j.children || []) if (['queued', 'running'].includes(child.status)) { child.status = 'interrupted'; child.phase = 'Interrupted when the app closed.'; } if (m && j.children) m.steps = j.children; }
     await this.rescan(); await this.persist();
-    await this.telemetry(); this.telemetryTimer = setInterval(() => this.telemetry(), 5000); this.telemetryTimer.unref();
+    if (libraryRoot !== undefined) await this.store.write('settings', this.config);
+    if (telemetry) { await this.telemetry(); this.telemetryTimer = setInterval(() => this.telemetry(), 5000); this.telemetryTimer.unref(); }
   }
   async rescan() {
     if (this.active || this.loadingModel) throw new Error('Wait for the current job before scanning models.');

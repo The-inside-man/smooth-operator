@@ -1,0 +1,10 @@
+import React from 'react';
+import {render} from 'ink';
+import {ToolScreen} from '../cli/tool-screen.mjs';
+import {makeReview} from '../cli/tool-runner.mjs';
+process.env.TERM='xterm-256color';delete process.env.CI;
+Object.defineProperty(process.stdin,'isTTY',{value:true});Object.defineProperty(process.stdout,'isTTY',{value:true});
+process.stdout.columns=100;process.stdout.rows=38;process.stdin.setRawMode=v=>{process.stderr.write(`RAW:${v}\n`);return process.stdin;};
+const review=makeReview({id:'fixture',name:'FIXTURE',status:'installed',executable:process.execPath},['-e','console.log("FIXTURE_RUNNING");setInterval(()=>{},1000)']);
+let ui;const quit=()=>{ui.unmount();process.stdin.setRawMode(false);};
+ui=render(React.createElement(ToolScreen,{size:{w:100,h:38},initialTools:[],initialReview:review,onQuit:quit,onBack:quit}),{exitOnCtrlC:false});await ui.waitUntilExit();

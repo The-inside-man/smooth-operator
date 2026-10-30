@@ -99,3 +99,5 @@ test('guide is bounded and missing app state is safe', () => {
   assert.ok(buildAppGuide().length <= APP_GUIDE_MAX_CHARS);
   assert.doesNotMatch(buildAppGuide(), /CURRENT APP FACTS/);
 });
+
+test('terminal help explains user-reviewed workflows without adding chat execution authority',()=>{const guide=buildAppGuide({request:'How do I use the TIM CLI toolbox?'});assert.match(guide,/searches it before generating an unexecuted draft/);assert.match(guide,/not chat tools/);assert.ok(guide.length<=APP_GUIDE_MAX_CHARS);});

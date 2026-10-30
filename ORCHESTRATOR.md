@@ -152,3 +152,7 @@ Use a fresh Agent conversation and confirm the selected model's identity before 
 | `npm run smoke:pipelines` | Uses the configured guide in `TIM_DATA_DIR` or `TIM-Studio-Data`, requires the small coder already installed, and saves the demo pipeline and run history there. Does not download weights. |
 
 Adapt a real-model harness to select and assert the replacement's actual model ID before using its result as replacement validation. Test in a separate data directory when you do not want example jobs or pipelines added to a user's history. Supplying this document, editing prompts, and passing mocked tests do not constitute fine-tuning or general capability validation.
+
+## Terminal companion
+
+The separately installed `tim` terminal app exposes `/tools`, reviewed `tim install`, socket listeners, offline capture views and a user-selected toolbox. These are user-operated CLI workflows, not new chat-agent tool permissions. Script proposals go through toolbox recall and are saved as unexecuted drafts; every execution needs fresh review. Consult [CLI.md](CLI.md) for exact commands and limitations. The owned CLI backend disables automatic guide setup/downloads on launch.

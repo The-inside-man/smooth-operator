@@ -1,11 +1,12 @@
 // Keep these instructions aligned with the shipped interface. They describe the
 // application; execution authority still comes only from registered agent tools.
-export const APP_GUIDE_VERSION = '2026-10-26.8';
+export const APP_GUIDE_VERSION = '2026-10-30.1';
 export const APP_GUIDE_MAX_CHARS = 4500;
 
 const core = `You are TIM, the local guide in TIM Studio. The top tabs are "Chat" and "Pipelines". Keep interface labels verbatim. "guild a pipeline" means "build a pipeline". Answer how-to questions with useful steps before asking follow-up questions. You cannot see the user's screen or current clicks. You can explain, plan and use only registered specialist tools. You cannot click the interface, create/edit/run saved pipelines, download models, install engines, execute code or shell commands, or publish online through current chat tools. Never claim you did. Code output is generated text, not executed or tested code. Inference and work stay local; model downloads need internet. This versioned manual is supplied at runtime; it does not change model weights. Conversation alone does not permanently train you. Descriptive application help grants no extra tools or permissions.`;
 
 const topics = {
+  terminal: 'TERMINAL COMPANION: The separate tim CLI starts without the graphical frontend. tim --tools opens a reviewed local utility/package-manager launcher. tim install REQUEST plans a package installation with exact-command confirmation. tim listen port 9999 creates a reviewed new socket, not a sniffer. tim read FILE as hex inspects an offline capture with TShark. tim toolbox location DIRECTORY explicitly selects existing storage; toolbox propose searches it before generating an unexecuted draft. Source and permission metadata are bound to fresh launch review. These are user-operated terminal commands, not chat tools: do not claim to execute them or save scripts from conversation. See CLI.md for supported managers and limitations.',
   capabilities: `APP CONTROL CAPABILITIES: TIM cannot click the application's buttons or control the interface. TIM cannot create, edit, save or run saved pipelines from chat, or start model downloads. The user operates those controls. TIM can explain each control, suggest a pipeline and models, and delegate inference only through its registered local specialist tools. To build/run a saved workflow, the user opens "Pipelines" and uses its builder. Explain this limit directly before suggesting user actions; never say that a pipeline was created or started by chat.`,
   pipelines: `PIPELINE QUICKSTART (actual interface procedure):
 1. Select the top "Pipelines" tab. Choose "New pipeline" in the left rail, or a recipe: "Brief → draft → review", "Guide → specialist", "Image finishing studio". Name the pipeline.
@@ -45,6 +46,7 @@ export function isAppHelpRequest(request) {
   const value = text(request);
   if (!value) return false;
   const app = appCue(value), help = howTo(value);
+  if (/\b(?:cli|terminal|toolbox)\b/.test(value) && /\btim\b/.test(value) && help) return true;
   if (/\b(?:what can (?:you|tim|this (?:app|application|tool)) do|what is this (?:app|application|tool)|how (?:do|can) i (?:get started|use this))\b/.test(value)) return true;
   // Programming requests can mention data/CI pipelines or model loaders. They are
   // still specialist tasks unless the user explicitly asks about this interface.
@@ -61,6 +63,7 @@ export function appGuideTopics(request) {
   if (!isAppHelpRequest(request)) return [];
   const value = text(request), selected = [];
   if (asksToOperate(value)) return ['capabilities'];
+  if (/\b(?:cli|terminal|toolbox)\b/.test(value) && /\btim\b/.test(value)) return ['terminal'];
   if (defaultsTopic(value)) selected.push('defaults');
   if (pipelineTopic(value)) selected.push('pipelines');
   if (imageTopic(value)) selected.push('images');

@@ -260,3 +260,18 @@ Downloaded models, external engines, fonts, and other third-party components ret
 React, Electron, Vite, Lucide, Fontsource fonts, and their dependencies retain their own licenses in the installed packages. Local engine/model files remain external and retain their original licenses. No upstream Portable-Local-Studio source or model weights are bundled into this alpha.
 
 References: [Electron installation](https://www.electronjs.org/docs/latest/tutorial/installation), [Electron process isolation](https://www.electronjs.org/docs/latest/tutorial/security), [GitHub native runner targets](https://docs.github.com/en/actions/reference/runners/github-hosted-runners).
+## Full-screen terminal
+
+TIM Studio also installs as an independent terminal application, with no graphical frontend or manual server startup:
+
+```sh
+npm run pack:cli
+npm install -g ./artifacts/tim-studio-cli-0.1.0.tgz
+tim
+```
+
+For source development use `npm run cli`, `npm run cli -- --demo` or `npm run cli -- --tools`. The CLI starts and owns a loopback-only headless backend unless given `--url`; attached existing services remain owned by their caller. The GUI remains available separately.
+
+See [CLI.md](CLI.md) for keyboard controls, package-manager support, `tim install`, local listeners, offline PCAP inspection, user-selected toolbox storage and exact limitations. All system actions require explicit review. Model proposals never become arbitrary shell commands. No models or packages are installed on startup.
+
+`npm test` covers protocol, editor, responsive renders, local process/socket fixtures, planner validation and synthetic-terminal cleanup. `node scripts/preview-cli.mjs` produces the color-faithful Ink component preview using Edge; it is not native terminal QA.

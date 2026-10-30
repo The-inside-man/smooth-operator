@@ -32,8 +32,8 @@ async function fileResponse(req, res, filename, download = false) {
   const stream = createReadStream(filename, { start, end });
   stream.on('error', () => res.destroy()); res.on('close', () => stream.destroy()); stream.pipe(res);
 }
-export async function startServer({ port = 4317, dataDir = process.env.TIM_DATA_DIR || path.join(root, 'data'), staticDir = path.join(root, 'dist'), autoSetup = process.env.TIM_AUTO_SETUP !== '0' } = {}) {
-  const studio = new Studio(dataDir); studio.on('error', error => console.error('Studio:', error.message)); await studio.init();
+export async function startServer({ port = 4317, dataDir = process.env.TIM_DATA_DIR || path.join(root, 'data'), staticDir = path.join(root, 'dist'), autoSetup = process.env.TIM_AUTO_SETUP !== '0', telemetry = true, libraryRoot } = {}) {
+  const studio = new Studio(dataDir); studio.on('error', error => console.error('Studio:', error.message)); await studio.init({ telemetry, libraryRoot });
   const clients = new Set();
   const server = http.createServer(async (req, res) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
