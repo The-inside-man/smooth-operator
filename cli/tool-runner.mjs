@@ -1,3 +1,5 @@
+import {TimingHistory,TimedRun,timingKey} from '../server/timing.mjs';
+const toolTimings=new TimingHistory(); // Session-only history: no tool paths/arguments persisted.
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {constants} from 'node:fs';
@@ -64,19 +66,21 @@ const activeRunners=new Set();
 export async function closeOwnedTools(){await Promise.all([...activeRunners].map(r=>r.close()));}
 export class ToolRunner extends EventEmitter {
  constructor(){super();this.child=null;this.pending=null;this.state={status:'idle',output:'',exitCode:null};}
- update(values){this.state={...this.state,...values};this.emit('state',this.state);}
+ update(values){this.state={...this.state,...values,...(this.timed?{timing:this.timed.snapshot()}: {})};this.emit('state',this.state);}
  async run(review,{confirmed=false}={}) {
   if(!confirmed)throw new Error('Explicit launch confirmation is required.');
   if(this.pending)throw new Error('A tool is already running. Cancel it or wait.');
   // Revalidate immutable review parameters at the execution boundary.
   makeReview({id:review.id,name:review.name,status:'installed',executable:review.executable},review.args,review);
+  this.timed=new TimedRun(toolTimings,timingKey({provider:'system',model:review.executable,operation:review.operation||review.id,args:review.args,cwd:review.cwd}));
   activeRunners.add(this);
-  this.update({status:'running',output:'',stdout:'',stderr:'',exitCode:null,signal:null,error:null,truncated:false,startedAt:Date.now(),review});
+  this.update({status:'running',output:'',stdout:'',stderr:'',exitCode:null,signal:null,error:null,truncated:false,startedAt:Date.now(),finishedAt:null,lastActivityAt:Date.now(),review});
   let cancelled=false,timedOut=false,killTimer,timer,settled=false;
   const promise=new Promise(resolve=>{
    const child=spawn(review.executable,[...review.args],{cwd:review.cwd,shell:false,windowsHide:true,detached:process.platform!=='win32',stdio:['ignore','pipe','pipe']});this.child=child;
    const finish=(code,signal,error)=>{if(settled)return;settled=true;clearTimeout(timer);clearTimeout(killTimer);this.child=null;this.cancelCurrent=null;
-    this.update({status:timedOut?'timed out':cancelled?'cancelled':error?'failed':code===0?'completed':'failed',exitCode:code,signal,error:error?.message||null,finishedAt:Date.now()});resolve(this.state);};
+    const timing=this.timed.finish(timedOut?'timed out':cancelled?'cancelled':error||code!==0?'failed':'completed');this.timed=null;
+    this.update({timing,status:timedOut?'timed out':cancelled?'cancelled':error?'failed':code===0?'completed':'failed',exitCode:code,signal,error:error?.message||null,lastActivityAt:Date.now(),finishedAt:Date.now()});resolve(this.state);};
    const stop=()=>{
     if(!child.pid||child.exitCode!==null||child.signalCode!==null)return;
     if(process.platform==='win32'){
@@ -93,7 +97,7 @@ export class ToolRunner extends EventEmitter {
    timer=setTimeout(()=>{timedOut=true;this.update({status:'stopping (timeout)'});stop();},review.timeoutMs);
    for(const [stream,label] of [[child.stdout,'stdout'],[child.stderr,'stderr']]){
     const decoder=new StringDecoder('utf8');
-    const collect=value=>{if(!value)return;const combined=this.state.output+`[${label}] `+clean(value);this.update({output:combined.slice(-65536),[label]:((this.state[label]||'')+clean(value)).slice(-65536),truncated:this.state.truncated||combined.length>65536});};
+    const collect=value=>{if(!value)return;this.timed?.touch();const combined=this.state.output+`[${label}] `+clean(value);this.update({lastActivityAt:Date.now(),output:combined.slice(-65536),[label]:((this.state[label]||'')+clean(value)).slice(-65536),truncated:this.state.truncated||combined.length>65536});};
     stream.on('data',chunk=>collect(decoder.write(chunk)));stream.on('end',()=>collect(decoder.end()));
    }
    child.once('error',error=>finish(null,null,error));child.once('close',(code,signal)=>finish(code,signal));

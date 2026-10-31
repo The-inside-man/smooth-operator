@@ -1,3 +1,4 @@
+import {activity,useClock,boundary} from './activity.mjs';
 import React,{useState,useEffect} from 'react';
 import {Box,Text,useInput} from 'ink';
 import {RawListener,listenerConfig} from './listener.mjs';
@@ -5,6 +6,7 @@ import {modelIntent} from './planner.mjs';
 import {clean} from './core.mjs';
 const h=React.createElement;
 export function ListenScreen({client,request,options={},onQuit}){
+ const now=useClock();
  const [listener]=useState(()=>new RawListener()),[controller]=useState(()=>new AbortController()),[state,setState]=useState(listener.state),[phase,setPhase]=useState('planning'),[notice,setNotice]=useState('Resolving listener intent…'),[plan,setPlan]=useState(null),[choice,setChoice]=useState(0),[size,setSize]=useState({w:process.stdout.columns||100,h:process.stdout.rows||30});
  useEffect(()=>{const update=s=>setState(s),resize=()=>setSize({w:process.stdout.columns||100,h:process.stdout.rows||30});listener.on('state',update);process.stdout.on('resize',resize);let alive=true;
   (async()=>{
@@ -36,5 +38,5 @@ export function ListenScreen({client,request,options={},onQuit}){
  else if(phase==='running')content=`${state.status.toUpperCase()} / ${state.bytes} bytes / ${state.connections} TCP connections\nOmitted from hex display: ${state.droppedBytes} bytes; only the latest 64 KiB of display is retained.\n${state.output}`;
  else content=notice;
  const width=Math.max(20,size.w-6),rows=Math.max(4,size.h-7),lines=clean(content).split('\n').flatMap(line=>{const out=[];for(let i=0;i<line.length;i+=width)out.push(line.slice(i,i+width));return out.length?out:[''];}),visible=phase==='running'?lines.slice(-rows):lines.slice(0,rows);
- return h(Box,{flexDirection:'column',width:size.w,height:size.h-1,paddingX:1,backgroundColor:'#080D0B'},h(Text,{color:'#8EE8AA',bold:true},'TIM / LISTEN'),h(Box,{borderStyle:process.env.TIM_ASCII==='1'?'classic':'double',borderColor:'#8EE8AA',paddingX:1,height:rows+2,overflow:'hidden'},h(Text,{color:'#C5F7D4'},visible.join('\n'))),h(Text,{color:'#DAA85A',wrap:'truncate'},clean(notice)),h(Text,{color:'#758D80'},'Esc stop/back  Ctrl+Q quit / owned sockets close'));
+ return h(Box,{flexDirection:'column',width:size.w,height:size.h-1,paddingX:1,backgroundColor:'#080D0B'},h(Text,{color:'#8EE8AA',bold:true},'TIM / LISTEN / '+boundary(client?.selection)),h(Box,{borderStyle:process.env.TIM_ASCII==='1'?'classic':'double',borderColor:'#8EE8AA',paddingX:1,height:rows+2,overflow:'hidden'},h(Text,{color:'#C5F7D4'},visible.join('\n'))),h(Text,{color:'#DAA85A',wrap:'truncate'},clean(phase==='running'?activity(state,now).text+' / UI clock only':phase==='review'?'Waiting for bind approval / ETA unavailable':notice)),h(Text,{color:'#758D80'},'Esc stop/back  Ctrl+Q quit / owned sockets close'));
 }

@@ -1,3 +1,4 @@
+import {listCloudModels} from './cloud-provider.mjs';
 import http from 'node:http';
 import fs from 'node:fs/promises';
 import { createReadStream } from 'node:fs';
@@ -47,6 +48,8 @@ export async function startServer({ port = 4317, dataDir = process.env.TIM_DATA_
     if (origin && !allowed.includes(origin)) return json(res, { error: 'Invalid origin.' }, 403);
     if (!['GET', 'HEAD'].includes(req.method) && req.headers['x-tim-request'] !== '1') return json(res, { error: 'Invalid request.' }, 403);
     try {
+      if (url.pathname === '/api/provider-models' && req.method === 'POST') return json(res, {models:await listCloudModels((await body(req)).provider)});
+      if (url.pathname === '/api/timing/reset' && req.method === 'POST') { await studio.resetTimings(); return json(res,{ok:true}); }
       if (url.pathname === '/api/state') return json(res, studio.snapshot());
       if (url.pathname === '/api/events' && req.method === 'GET') {
         res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });

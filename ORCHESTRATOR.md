@@ -156,3 +156,5 @@ Adapt a real-model harness to select and assert the replacement's actual model I
 ## Terminal companion
 
 The separately installed `tim` terminal app exposes `/tools`, reviewed `tim install`, socket listeners, offline capture views and a user-selected toolbox. These are user-operated CLI workflows, not new chat-agent tool permissions. Script proposals go through toolbox recall and are saved as unexecuted drafts; every execution needs fresh review. Consult [CLI.md](CLI.md) for exact commands and limitations. The owned CLI backend disables automatic guide setup/downloads on launch.
+
+The CLI may explicitly select OpenAI or xAI for text chat and typed planning with `--provider` and `--model`. This does not add cloud access or OS execution permissions to the local desktop guide. Provider requests exclude automatic file/capture uploads; activity metadata never exposes reasoning text. See CLI.md for API billing, selection and cancellation limits.

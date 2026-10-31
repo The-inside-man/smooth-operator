@@ -1,3 +1,4 @@
+import {boundary,useClock} from './activity.mjs';
 import React,{useState,useEffect} from 'react';
 import {Box,Text,useInput} from 'ink';
 import {ToolScreen} from './tool-screen.mjs';
@@ -7,6 +8,7 @@ import {modelIntent} from './planner.mjs';
 import {clean} from './core.mjs';
 const h=React.createElement;
 export function CaptureScreen({client,file,request,options={},onQuit}){
+ const now=useClock(),[startedAt]=useState(Date.now);
  const [review,setReview]=useState(null),[message,setMessage]=useState('Locating TShark…'),[controller]=useState(()=>new AbortController()),[size,setSize]=useState({w:process.stdout.columns||100,h:process.stdout.rows||30});
  useEffect(()=>{let alive=true;const resize=()=>setSize({w:process.stdout.columns||100,h:process.stdout.rows||30});process.stdout.on('resize',resize);
   (async()=>{
@@ -23,5 +25,5 @@ export function CaptureScreen({client,file,request,options={},onQuit}){
  },[]);
  useInput((input,key)=>{if(key.escape||key.ctrl&&['q','c'].includes(input)){controller.abort();onQuit();}},{isActive:!review});
  if(review)return h(ToolScreen,{size,initialReview:review,initialTools:[],onBack:onQuit,onQuit});
- return h(Box,{flexDirection:'column',padding:1},h(Text,{color:'#8EE8AA'},'TIM / OFFLINE CAPTURE'),h(Text,{color:'#DAA85A'},clean(message)),h(Text,null,'Packet bytes remain local. Encrypted payloads stay encrypted. Esc quits.'));
+ return h(Box,{flexDirection:'column',padding:1},h(Text,{color:'#8EE8AA'},'TIM / OFFLINE CAPTURE / '+boundary(client?.selection)),h(Text,{color:'#DAA85A'},clean(message)),h(Text,{color:'#758D80'},'elapsed '+Math.floor((now-startedAt)/1000)+'s | ETA unavailable | UI clock only'),h(Text,null,'Packet bytes remain local. Encrypted payloads stay encrypted. Esc quits.'));
 }

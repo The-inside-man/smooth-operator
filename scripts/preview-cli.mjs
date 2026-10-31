@@ -1,7 +1,11 @@
 import fs from 'node:fs/promises';
 delete process.env.NO_COLOR; process.env.FORCE_COLOR='3';
 const [{default:React},{renderToString},{App},{demoState,clean},{chromium}]=await Promise.all([import('react'),import('ink'),import('../cli/app.mjs'),import('../cli/core.mjs'),import('playwright')]);
-const output=renderToString(React.createElement(App,{demo:true,initial:demoState,staticPreview:true,dimensions:{w:160,h:52}}),{columns:160});
+const active=process.argv.includes('--activity')||process.argv.includes('--eta'),compact=process.argv.includes('--compact'),dimensions=compact?{w:100,h:38}:{w:160,h:52};
+const initial=structuredClone(demoState),now=Date.now();
+if(active){initial.jobs=[{id:'sample-job',sessionId:'demo',provider:'openai',status:'running',phase:'Provider processing; no visible output yet',startedAt:now-42000,lastActivityAt:now-7000}];initial.sessions[0].title='Activity preview';initial.sessions[0].messages=[{role:'user',content:'Explain how this project is organized. (Sample request)'},{role:'assistant',jobId:'sample-job',status:'running',content:''}];}
+if(process.argv.includes('--eta')){const {TimingHistory,TimedRun,timingKey}=await import('../server/timing.mjs');const history=new TimingHistory();const key=timingKey({provider:'openai',model:'sample',operation:'read'});for(const duration of [70000,75000,80000,72000,77000])history.record(key,duration);let clock=0;const run=new TimedRun(history,key,{clock:()=>clock});clock=35000;run.touch();clock=42000;initial.jobs[0].timing=run.snapshot();initial.sessions[0].messages[0].content='Plan an offline hex view for port 9999. (Sample planning request)';}
+const output=renderToString(React.createElement(App,{demo:true,initial,client:active?{selection:{provider:'openai',modelId:'user-selected-model'}}:undefined,staticPreview:true,dimensions}),{columns:dimensions.w});
 if(!/\x1b\[38;2;/.test(output))throw new Error('Truecolor ANSI output is missing from the preview');
 await fs.mkdir('artifacts',{recursive:true});await fs.writeFile('artifacts/tim-terminal-frame.ansi',output);await fs.writeFile('artifacts/tim-terminal-frame.txt',clean(output));
 const escape=s=>s.replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;');

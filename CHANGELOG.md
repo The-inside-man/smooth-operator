@@ -1,3 +1,9 @@
+## Unreleased - 2026-10-31
+
+- Add explicit OpenAI/xAI Responses text streaming and strict-schema CLI planning, dynamic model discovery, provider boundaries and safe error reporting. No credentials are stored and no provider fallback is automatic.
+- Show observed phases, elapsed/last-activity time and conservative historical ETA ranges after sufficient comparable samples; separate UI clocks from backend/provider events. Add reconnect, reviewed retry and idempotent chat submissions.
+- Validate with mocked cloud HTTP/SSE, dummy keys and isolated local fixtures; live vendor/account behavior is not certified.
+
 # Changelog
 
 ## Unreleased - TIM terminal workspace

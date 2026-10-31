@@ -26,6 +26,39 @@ Normal startup owns an ephemeral loopback-only backend and closes it on exit. `-
 
 Ctrl+S sends; Enter inserts a newline; Esc cancels; Ctrl+Q quits. `/help`, `/models`, `/model N`, `/agent N`, `/sessions` and `/tools` expose controls. `NO_COLOR=1` disables color; `TIM_ASCII=1` selects ASCII borders. The enlarged hero subtitle uses bold, tracked terminal cells, not independent font scaling.
 
+## Provider selection and activity
+
+Local models remain the default. Cloud access is explicit and never a fallback:
+
+~~~sh
+tim models --provider openai
+tim models --provider xai
+tim --provider openai --model MODEL_ID_FROM_LIST
+tim --provider xai --model MODEL_ID_FROM_LIST
+tim install "a tool request" --provider openai --model MODEL_ID
+tim listen port 9999 --provider xai --model MODEL_ID
+tim read capture.pcap "show hex for port 9999" --provider openai --model MODEL_ID
+tim toolbox propose "a small tool request" --provider xai --model MODEL_ID
+~~~
+
+The model list is fetched only on request. IDs are account-visible, not a capability guarantee: select a text model supporting the Responses API; planning additionally requires strict JSON-schema output. Unsupported model/schema requests fail clearly without falling back to plain text, another model or another provider. There is no hardcoded cloud model list. Local --model selects the model for chat and planning; /model N changes the local chat selection. TIM_PROVIDER and TIM_MODEL are optional environment-based selection references, overridden by flags. Cloud selection does not overwrite desktop/local defaults.
+
+OpenAI reads OPENAI_API_KEY and xAI reads XAI_API_KEY from the **backend process environment**. With --url, these must already be available to that existing server. TIM does not prompt for, save or print keys. Consumer ChatGPT/Grok sign-in is not an API credential: API access and usage billing/credits are separate; TIM does not use a consumer subscription login. Development checks use dummy keys and mock HTTP only.
+
+Both adapters use HTTPS POST /v1/responses with SSE, stream:true and store:false at api.openai.com or api.x.ai. No configurable arbitrary proxy endpoint, background response, vendor-hosted tool, file upload or reasoning transcript is enabled. store:false is not a promise of zero provider retention; provider policies still apply. Model discovery uses GET /v1/models. Cloud support covers text chat/code and typed install/listen/read/build planning, not desktop media, pipelines or autonomous agent mode.
+
+The header names the provider; cloud startup opens a fresh session. Typed prompts, that cloud session's text history and planning requests go to the selected vendor. Local session history, attachments, artifacts, tool transcripts and packet contents are blocked from crossing that boundary automatically. Capture planning receives only the typed request. Toolbox draft planning may receive candidate names/status metadata after local recall. Do not paste secrets into prompts: this is not a general secret scanner.
+
+During work, TIM shows the observed phase, elapsed time and last activity age. Tool stdout/stderr, model tokens/phase changes and provider lifecycle events count as activity. Provider reasoning events can indicate processing but their text is never displayed or saved. SSE comments update connection freshness only. The UI clock explicitly does **not** prove that a worker is alive. A quiet job is flagged after 60 seconds without activity. Historical ETA ranges become available after at least five usable comparable completions. Typed install/listen/read planning is keyed by provider, model, operation, input-size bucket, runtime settings and local warm/cold state. Cold local model loading has a separate load-only estimate. Repeated identical tool commands use session-only timing history. Ranges use filtered recent durations with a 20% margin, labeled low confidence (5-11 samples) or moderate confidence (12+); these are empirical ranges, not statistical coverage guarantees. No token-total percentage is invented. Free-form chat/build generation, listeners and jobs without comparable evidence remain unavailable; timeout limits are not completion estimates.
+
+Timing durations and activity gaps use monotonic clocks. Cancelled, failed, timed-out and stalled runs never train estimates. Outliers are filtered; fewer than five usable samples, widely varying samples, a current stall or exceeding the historical range suppresses the estimate. Model timing history contains only hashed grouping keys, aggregate bounded duration samples and an update timestamp in timings.json under the selected backend data directory (20 samples/key, 128 keys, 30-day expiry). It contains no prompts, arguments, outputs or credentials. /eta-reset clears this history when no job is running; changing provider/model automatically selects a separate group. Tool history disappears when the CLI exits. Known-byte download counters are not connected to this CLI estimator; no download ETA is claimed.
+
+Ctrl+R or /reconnect reconnects backend events without resubmitting. Backend silence expires after 45 seconds (the backend sends transport keepalives every 20 seconds); cloud transport silence closes locally after 90 seconds, with a ten-minute request/planning ceiling. Escape cancels the current job. A cloud cancellation aborts the HTTP stream locally; vendor-side stopping and final billing cannot be confirmed. OpenAI's response-cancel endpoint is for background responses, which this client does not create.
+
+Failed sends retain the draft and reuse a submission ID for the same unchanged request. The server deduplicates accepted IDs, including concurrent retries. After an observed failed/cancelled/interrupted turn, /retry restores the prior request for review; Ctrl+S then starts a new turn. It never silently repeats a paid request. 401/403, 429 (with numeric Retry-After where supplied), unsupported capabilities, malformed/incomplete streams and disconnects surface safe errors. There are no automatic provider retries, including after an uncertain outcome. Cancellation/reconnection never retries installation or tool execution; those retain fresh exact-command approval.
+
+Official protocol references checked for this implementation: [OpenAI streaming](https://developers.openai.com/api/docs/guides/streaming-responses), [OpenAI structured output](https://developers.openai.com/api/docs/guides/structured-outputs), [OpenAI cancellation](https://developers.openai.com/api/reference/resources/responses/methods/cancel), [xAI Responses](https://docs.x.ai/developers/rest-api-reference/inference/responses), [xAI structured output](https://docs.x.ai/developers/model-capabilities/text/structured-outputs), and [xAI model discovery](https://docs.x.ai/developers/rest-api-reference/inference/models).
+
 ## Tools and package managers
 
 `tim --tools` discovers installed utilities without starting a model. Type to search, Tab to change category, arrows to select, and Enter to edit arguments. Review the executable, literal argv, targets and working directory; Ctrl+S launches once. Esc cancels the owned process tree. Output is sanitized and bounded; ordinary runs have a 60-second limit, package operations up to five minutes. Child stdin is closed. Interactive terminal applications are unsupported.
@@ -37,7 +70,7 @@ tim install "the tool I need"
 tim install typescript --manager npm
 ```
 
-Natural-language planning uses the loaded model, otherwise the configured main chat model, through existing sessions/jobs/SSE and model services. Only validated structured intent is accepted. Explicit manager plus exact package ID bypasses inference. The planner verifies actual metadata for npm, APT and Homebrew formulae. It selects a uniquely verified compatible candidate; multiple verified alternatives require a manager choice. Unrelated package environments do not automatically create ambiguity. npm/APT pin the observed version; Homebrew displays the candidate but does not pin it.
+Natural-language planning uses the explicitly selected provider/model, otherwise the loaded or configured local main chat model, through existing sessions/jobs/SSE and model services. Only validated structured intent is accepted. Explicit manager plus exact package ID bypasses inference. The planner verifies actual metadata for npm, APT and Homebrew formulae. It selects a uniquely verified compatible candidate; multiple verified alternatives require a manager choice. Unrelated package environments do not automatically create ambiguity. npm/APT pin the observed version; Homebrew displays the candidate but does not pin it.
 
 Exact install argv/source review is required before mutation. Metadata queries may contact configured registries beforehand. No automatic new repositories, credentials or license acceptance. Manager-native prompts may fail with closed stdin; use the displayed command in a normal terminal when necessary. On a failed/missing-tool plan, Ctrl+B explicitly requests the shared recall-first small-tool proposal workflow. Nothing generated is executed automatically.
 

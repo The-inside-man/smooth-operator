@@ -64,3 +64,8 @@ test('hoodie bottom aligns to hero prompt without moving surrounding UI',()=>{
   mark.forEach((line,i)=>{if(line.trim())assert.equal(lines[markTop+i].indexOf(line),promptX);});
  }
 });
+
+test('active provider status fits large, compact and narrow layouts without moving the composer',()=>{
+ const initial=structuredClone(demoState),now=Date.now();initial.jobs=[{id:'fixture',sessionId:'demo',status:'running',phase:'Provider processing',startedAt:now-70000,lastActivityAt:now-65000}];
+ for(const dimensions of [{w:160,h:52},{w:100,h:38},{w:60,h:20}]){const frame=clean(renderToString(React.createElement(App,{initial,client:{selection:{provider:'xai',modelId:'fixture'}},staticPreview:true,dimensions}),{columns:dimensions.w}));assert.match(frame,/XAI \/ CLOUD/);assert.match(frame,/ETA unavailable/);assert.match(frame,/COMMAND/);assert.ok(frame.split('\n').every(line=>line.length<=dimensions.w));}
+});

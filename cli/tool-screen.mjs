@@ -1,3 +1,4 @@
+import {activity,useClock,observeJob} from './activity.mjs';
 import {verifyToolRun,recordToolRun} from './toolbox.mjs';
 import React,{useState,useEffect} from 'react';
 import {Box,Text,useInput,useCursor} from 'ink';
@@ -11,6 +12,7 @@ const wrap=(value,width)=>clean(value).split('\n').flatMap(line=>{const result=[
 const operations=['version','search','list','install','update','remove'];
 
 export function ToolScreen({size,onBack,onQuit,initialTools=null,initialReview=null,staticPreview=false}) {
+ const now=useClock(!staticPreview);
  const [runner]=useState(()=>new ToolRunner()),[tools,setTools]=useState(initialTools||[]),[query,setQuery]=useState(''),[category,setCategory]=useState('All'),[selected,setSelected]=useState(0),[phase,setPhase]=useState(initialReview?'review':'menu'),[tool,setTool]=useState(null),[operation,setOperation]=useState('version'),[draft,setDraft]=useState({text:'',cursor:0}),[review,setReview]=useState(initialReview),[run,setRun]=useState(runner.state),[notice,setNotice]=useState(initialTools?'':'Discovering installed tools on PATH…'),[scroll,setScroll]=useState(0),[closing,setClosing]=useState(false);
  const {setCursorPosition}=useCursor();
  const categories=['All','Development','Network','Security','System','Packages'];
@@ -18,7 +20,7 @@ export function ToolScreen({size,onBack,onQuit,initialTools=null,initialReview=n
  const index=Math.min(selected,Math.max(0,filtered.length-1));
  const running=['running','cancelling','stopping (timeout)'].includes(run.status);
  const refresh=async()=>{setNotice('Discovering installed tools on PATH…');try{setTools(await discoverTools([...(await readRegistry()),...packageManagers]));setNotice('Discovery reads PATH; no tool has been executed.');}catch(e){setNotice(e.message);}};
- useEffect(()=>{if(!initialTools&&!staticPreview)void refresh();const listener=s=>{setRun(s);setScroll(0);};runner.on('state',listener);return()=>{runner.off('state',listener);void runner.close();};},[]);
+ useEffect(()=>{if(!initialTools&&!staticPreview)void refresh();const listener=s=>{setRun(observeJob(s));setScroll(0);};runner.on('state',listener);return()=>{runner.off('state',listener);void runner.close();};},[]);
  useEffect(()=>{setCursorPosition(undefined);},[phase]);
  const choose=t=>{if(t.status!=='installed'){setNotice(`${t.name}: ${t.status}. Interactive tools and shell shims are not executed.`);return;}setTool(t);setOperation('version');setDraft({text:t.manager?'':t.defaultArgs.map(a=>JSON.stringify(a)).join(' '),cursor:0});setPhase(t.manager?'operation':'args');setScroll(0);setNotice('');};
  const propose=()=>{try{const next=tool.manager?packageReview(tool,operation,draft.text):makeReview(tool,[...(tool.prefixArgs||[]),...parseArguments(draft.text)]);setReview(next);setPhase('review');setScroll(0);setNotice('Nothing has run. Ctrl+S confirms this exact command once. Esc returns to editing.');}catch(e){setNotice(e.message);}};
@@ -62,7 +64,7 @@ export function ToolScreen({size,onBack,onQuit,initialTools=null,initialReview=n
   label('TIM / TOOLS  '+(phase==='menu'?'installed utilities and package managers':phase.toUpperCase()),{color:'#8EE8AA',bold:true}),
   label('Local processes / exact argv review / no automatic elevation',{color:'#758D80'}),
   h(Box,{borderStyle:process.env.TIM_ASCII==='1'?'classic':'double',borderColor:'#8EE8AA',height:height+2,flexShrink:0,paddingX:1,overflow:'hidden'},label(view.join('\n'))),
-  label(notice,{color:'#DAA85A',wrap:'truncate'}),
+  label(phase==='output'?activity(run,now).text+(activity(run,now).stale?' / no recent output':' / UI clock only'):phase==='review'?'Waiting for exact-command approval / ETA unavailable':notice,{color:'#DAA85A',wrap:'truncate'}),
   label(phase==='menu'?'Type search  Tab category  Up/Down select  Enter choose  Ctrl+R rescan':phase==='review'?'Ctrl+S confirm exact command  Esc edit  PgUp/PgDn review':phase==='output'?'Esc cancel/back  Enter review another run  PgUp/PgDn output':'Up/Down operation  Enter review  Esc back',{color:'#758D80',wrap:'truncate'}),
   label('Ctrl+Q / Ctrl+C cancel owned tool and quit; chat jobs are separate.',{color:'#758D80',wrap:'truncate'}));
 }

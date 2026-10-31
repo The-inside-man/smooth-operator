@@ -18,12 +18,12 @@ export function hexDump(buffer){
 export class RawListener extends EventEmitter {
  constructor(){super();this.state={status:'idle',output:'',bytes:0,connections:0,droppedBytes:0};this.peers=new Set();}
  publish(){this.emit('state',{...this.state});}
- append(value){this.state.output=(this.state.output+value+'\n').slice(-65536);}
+ append(value){this.state.lastActivityAt=Date.now();this.state.output=(this.state.output+value+'\n').slice(-65536);}
  receive(bytes,peer){this.state.bytes+=bytes.length;const shown=bytes.subarray(0,2048);this.state.droppedBytes+=bytes.length-shown.length;this.append(`${peer} / ${bytes.length} bytes\n${hexDump(shown)}`);}
  async start(config,{confirmed=false}={}){
   if(!confirmed)throw new Error('Review and confirm the exact listener before binding.');
   if(this.server)throw new Error('Listener is already running.');this.config=listenerConfig(config);config=this.config;
-  this.state={status:'starting',output:'',bytes:0,connections:0,droppedBytes:0};this.publish();
+  this.state={startedAt:Date.now(),lastActivityAt:Date.now(),status:'starting',output:'',bytes:0,connections:0,droppedBytes:0};this.publish();
   const fail=error=>{this.state.status='failed';this.append(error.message);this.publish();};
   const ready=new Promise((resolve,reject)=>{
    if(config.protocol==='tcp'){
@@ -45,6 +45,6 @@ export class RawListener extends EventEmitter {
  async stop(preserveError=false){
   clearInterval(this.interval);clearTimeout(this.timer);for(const socket of this.peers)socket.destroy();this.peers.clear();const server=this.server;this.server=null;
   if(server)await new Promise(resolve=>{try{server.close(resolve);}catch{resolve();}});
-  if(!preserveError)this.state.status='stopped';this.publish();
+  this.state.finishedAt=Date.now();if(!preserveError)this.state.status='stopped';this.publish();
  }
 }

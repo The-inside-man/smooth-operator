@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import {selection,boundary} from './activity.mjs';
 import React from 'react';
 import {render} from 'ink';
 import path from 'node:path';
@@ -10,6 +11,8 @@ const args=process.argv.slice(2);
 const usage=`TIM Studio terminal 0.1.0
 Usage: tim [--demo | --tools] [--url http://127.0.0.1:PORT]
            [--data-dir DIRECTORY] [--library DIRECTORY] [--no-color]
+       tim models --provider openai|xai
+       tim [--provider local|openai|xai] [--model ID]
        tim install REQUEST [--manager NAME]
        tim listen port 9999 [--protocol tcp|udp] [--mode bind] [--host IP]
        tim toolbox location DIRECTORY
@@ -20,6 +23,9 @@ Usage: tim [--demo | --tools] [--url http://127.0.0.1:PORT]
 tim starts its own loopback-only headless backend; no GUI is required.
 --url attaches to a server you own without stopping it on exit.
 --demo is sample data only. --tools opens local utilities without a model/backend.
+--provider and --model apply to chat, install/listen/read and toolbox propose.
+Cloud API credentials are read only from backend OPENAI_API_KEY / XAI_API_KEY.
+TIM_PROVIDER / TIM_MODEL can select the provider without changing stored settings.
 --library selects an existing model library. No models are downloaded or run on startup.
 ${help}
 Ctrl+S sends; Enter inserts a newline; Esc cancels; Ctrl+Q quits.
@@ -35,25 +41,32 @@ let client,backend,ui,restored=false,closing;
 const restore=()=>{if(restored)return;restored=true;client?.close();ui?.unmount();if(interactive){process.stdin.setRawMode?.(false);process.stdout.write('\x1b[0m\x1b[?25h\x1b[?1049l');}process.stdin.pause();};
 const close=()=>closing||(closing=(async()=>{await closeOwnedTools();restore();await backend?.close();})());
 try{
- const options={},request=[];const install=args[0]==='install',listen=args[0]==='listen',read=args[0]==='read';
- for(let i=install||listen||read?1:0;i<args.length;i++){
+ const options={},request=[];const install=args[0]==='install',listen=args[0]==='listen',read=args[0]==='read',models=args[0]==='models';
+ for(let i=install||listen||read||models?1:0;i<args.length;i++){
   const arg=args[i];
   if(['--demo','--tools','--no-color'].includes(arg)){options[arg.slice(2)]=true;continue;}
-  if(['--url','--data-dir','--library','--manager','--protocol','--mode','--host','--filter','--view'].includes(arg)){if(!args[i+1]||args[i+1].startsWith('--'))throw new Error(arg+' requires a value');options[arg.slice(2)]=args[++i];continue;}
+  if(['--provider','--model','--url','--data-dir','--library','--manager','--protocol','--mode','--host','--filter','--view'].includes(arg)){if(!args[i+1]||args[i+1].startsWith('--'))throw new Error(arg+' requires a value');options[arg.slice(2)]=args[++i];continue;}
   if((install||listen||read)&&!arg.startsWith('--'))request.push(arg);else throw new Error('Unknown argument: '+arg);
  }
  if((options.demo||options.tools)&&(install||listen||read)||options.demo&&options.tools)throw new Error('Choose one of --demo, --tools or install.');
  if(options.manager&&!install)throw new Error('--manager is only valid with tim install.');
  if((install||listen||read)&&!request.length)throw new Error('Supply a request after tim install or tim listen.');
- if(!interactive&&!options.demo){
+ const chosen=models?{provider:options.provider||process.env.TIM_PROVIDER}:options.demo||options.tools?{provider:'local'}:selection(options);
+ if(models){
+  if(!['openai','xai'].includes(chosen.provider))throw new Error('tim models requires --provider openai or xai.');
+  if(!options.url)backend=await ownBackend({dataDir:options['data-dir'],libraryRoot:options.library&&path.resolve(options.library)});
+  client=new Client(options.url||backend.url);const result=await client.request('provider-models',{provider:chosen.provider});
+  console.log(clean(result.models.join('\n'))+'\nIDs are account-visible, not a guarantee of text/strict-schema capability.');
+ }else if(!interactive&&!options.demo){
   if(install||listen||read)throw new Error('This action needs an interactive terminal for exact command confirmation. Nothing was installed.');
   console.log(usage+'\nOpen an interactive terminal to start TIM. No backend was started.');
  }else{
   if(!options.demo&&!options.tools){
    if(!options.url)backend=await ownBackend({dataDir:options['data-dir'],libraryRoot:options.library&&path.resolve(options.library)});
-   client=new Client(options.url||backend.url);
+   client=new Client(options.url||backend.url,chosen);
   }
   const initial=client?await client.request('state'):structuredClone(demoState);
+  if(client&&chosen.provider!=='local'){const session=await client.request('sessions',{});initial.sessions=[session,...initial.sessions];}
   if(!interactive){console.log('TIM Studio / SAMPLE DATA');console.log('Interactive terminal required for composing.');}
   else{
    process.stdout.write('\x1b[?1049h\x1b[2J\x1b[H');process.once('exit',restore);

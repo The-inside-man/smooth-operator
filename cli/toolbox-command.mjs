@@ -1,3 +1,4 @@
+import {selection,boundary} from './activity.mjs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import React,{useEffect,useState} from 'react';
@@ -9,7 +10,7 @@ import {ownBackend} from './backend.mjs';
 import {proposeToolDraft} from './planner.mjs';
 import {ToolScreen} from './tool-screen.mjs';
 export async function toolboxCommand(argv){
- const args=[],options={};for(let i=0;i<argv.length;i++){if(['--toolbox','--data-dir','--url','--library','--name','--id'].includes(argv[i])){if(!argv[i+1])throw new Error('Missing option value');options[argv[i].slice(2)]=argv[++i];}else args.push(argv[i]);}
+ const args=[],options={};for(let i=0;i<argv.length;i++){if(['--provider','--model','--toolbox','--data-dir','--url','--library','--name','--id'].includes(argv[i])){if(!argv[i+1])throw new Error('Missing option value');options[argv[i].slice(2)]=argv[++i];}else args.push(argv[i]);}
  if(options['data-dir'])process.env.TIM_DATA_DIR=path.resolve(options['data-dir']);
  const [action,...rest]=args;
  if(action==='location'){if(rest.length!==1)throw new Error('Usage: tim toolbox location ABSOLUTE_EXISTING_DIRECTORY');console.log('Selected toolbox: '+clean(await selectToolbox(rest[0])));return;}
@@ -24,7 +25,8 @@ export async function toolboxCommand(argv){
  if(action==='propose'){
   const request=rest.join(' ');if(!request)throw new Error('Supply a tool request.');
   let backend;const controller=new AbortController(),stop=()=>controller.abort();process.once('SIGINT',stop);process.once('SIGTERM',stop);try{
-   let actualClient;const client={get url(){return actualClient?.url;},async request(...args){if(!actualClient){if(!options.url)backend=await ownBackend({dataDir:options['data-dir'],libraryRoot:options.library&&path.resolve(options.library)});controller.signal.throwIfAborted();actualClient=new Client(options.url||backend.url);}return actualClient.request(...args);}};
+   const chosen=selection(options);console.log(clean(boundary(chosen)));
+   let actualClient;const client={selection:chosen,get url(){return actualClient?.url;},async request(...args){if(!actualClient){if(!options.url)backend=await ownBackend({dataDir:options['data-dir'],libraryRoot:options.library&&path.resolve(options.library)});controller.signal.throwIfAborted();actualClient=new Client(options.url||backend.url,chosen);}return actualClient.request(...args);}};
    const result=await proposeToolDraft({root,request,client,signal:controller.signal,onStatus:message=>console.log(clean(message))});
    if(result.kind==='reuse')console.log(clean('Existing candidates found BEFORE generation. Review with tim toolbox show ID; run with tim toolbox run ID:\n'+result.candidates.map(c=>c.id+' v'+c.version+' '+c.name+' ('+c.reviewState+')').join('\n')));
    else console.log('Saved unexecuted draft '+result.draft.id+' v'+result.draft.version+'. Review with tim toolbox show '+result.draft.id+'.');
