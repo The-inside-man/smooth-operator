@@ -26,6 +26,8 @@ Normal startup owns an ephemeral loopback-only backend and closes it on exit. `-
 
 Enter sends (Ctrl+S is an alias); Ctrl+J inserts a newline; Esc cancels; Ctrl+Q quits. `/help`, `/models`, `/model N`, `/agent N`, `/sessions` and `/tools` expose controls. `NO_COLOR=1` disables color; `TIM_ASCII=1` selects ASCII borders. The enlarged hero subtitle uses bold, tracked terminal cells, not independent font scaling.
 
+The CLI launcher selects the production React/Ink renderer before loading the UI when `NODE_ENV` is unset or empty. This keeps idle animation from accumulating development profiling records in Node's heap. Animation stays enabled; a larger heap is not required. Set `NODE_ENV=development` only for short debugging sessions: its profiling records can grow for as long as the UI runs. Launch through `tim`, `npm run cli`, or `node cli/index.mjs` so this initialization runs.
+
 ## Provider selection and activity
 
 Local models remain the default. Cloud access is explicit and never a fallback:
