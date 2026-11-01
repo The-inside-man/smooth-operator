@@ -1,3 +1,4 @@
+import {useEditorInput} from './editor-input.mjs';
 import {activity,useClock,observeJob} from './activity.mjs';
 import {verifyToolRun,recordToolRun} from './toolbox.mjs';
 import React,{useState,useEffect} from 'react';
@@ -26,7 +27,7 @@ export function ToolScreen({size,onBack,onQuit,initialTools=null,initialReview=n
  const propose=()=>{try{const next=tool.manager?packageReview(tool,operation,draft.text):makeReview(tool,[...(tool.prefixArgs||[]),...parseArguments(draft.text)]);setReview(next);setPhase('review');setScroll(0);setNotice('Nothing has run. Ctrl+S confirms this exact command once. Esc returns to editing.');}catch(e){setNotice(e.message);}};
  const launch=()=>{if(!review||running)return;setPhase('output');setNotice('Running with current privileges. Esc cancels this process tree.');setScroll(0);void (async()=>{await verifyToolRun(review);const result=await runner.run(review,{confirmed:true});await recordToolRun(review,result);})().catch(e=>{setNotice(e.message);});setReview(null);};
  const quit=async()=>{if(closing)return;setClosing(true);await runner.close();onQuit();};
- useInput((input,key)=>{
+ useEditorInput((input,key)=>{
   if(closing)return;
   if(key.ctrl&&['q','c'].includes(input)){void quit();return;}
   if(key.escape){if(running){void runner.cancel();setNotice('Cancellation requested for this tool only.');}else if(initialReview||phase==='menu')onBack();else{setPhase(phase==='review'?'args':'menu');setReview(null);setScroll(0);}return;}
@@ -36,7 +37,7 @@ export function ToolScreen({size,onBack,onQuit,initialTools=null,initialReview=n
    if(key.upArrow){setSelected(Math.max(0,index-1));return;}if(key.downArrow){setSelected(Math.min(filtered.length-1,index+1));return;}
    if(key.return){if(filtered[index])choose(filtered[index]);return;}
    if(key.ctrl&&input==='r'){void refresh();return;}
-   if(key.backspace){setQuery(q=>q.slice(0,-1));setSelected(0);return;}
+   if(key.backspace){setQuery(q=>edit({text:q,cursor:q.length},'',{backspace:true}).text);setSelected(0);return;}
    if(!key.ctrl&&!key.meta){setQuery(q=>q+clean(input));setSelected(0);}return;
   }
   if(phase==='operation'){

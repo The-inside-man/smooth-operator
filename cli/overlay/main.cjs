@@ -1,0 +1,15 @@
+const {app,BrowserWindow,ipcMain}=require('electron');const path=require('node:path');const readline=require('node:readline');const {pathToFileURL}=require('node:url');
+app.commandLine.appendSwitch('disable-gpu');
+const profile=require('node:fs').mkdtempSync(path.join(require('node:os').tmpdir(),'tim-voice-overlay-'));app.setPath('userData',profile);app.on('quit',()=>{const base=path.resolve(require('node:os').tmpdir())+path.sep;if(path.resolve(profile).startsWith(base))try{require('node:fs').rmSync(profile,{recursive:true,force:true});}catch{}});
+let win,connection,latest={state:'muted',listening:false};const allowed=new Set(['mute','unmute','stop','hide']);const file=path.join(__dirname,'index.html');
+app.whenReady().then(()=>{win=new BrowserWindow({width:270,height:340,show:false,focusable:false,alwaysOnTop:true,skipTaskbar:true,resizable:false,frame:false,backgroundColor:'#080D0B',webPreferences:{preload:path.join(__dirname,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true}});
+ win.setMenu(null);win.webContents.setWindowOpenHandler(()=>({action:'deny'}));win.webContents.on('will-navigate',e=>e.preventDefault());win.webContents.session.setPermissionRequestHandler((_c,_p,cb)=>cb(false));
+ ipcMain.on('voice-control',(event,action)=>{if(event.senderFrame?.url!==pathToFileURL(file).href||!allowed.has(action))return;if(action==='hide'){win.hide();return;}connection?.write(JSON.stringify({control:action})+'\n');});
+ win.once('ready-to-show',()=>{if(!process.argv.includes('--hidden-test'))win.showInactive();});win.loadFile(file);win.webContents.on('did-finish-load',()=>win.webContents.send('voice-state',latest));if(process.argv.includes('--hidden-test'))win.webContents.once('did-finish-load',()=>setTimeout(async()=>{if(process.env.TIM_OVERLAY_PREVIEW){const image=await win.webContents.capturePage();require('node:fs').writeFileSync(process.env.TIM_OVERLAY_PREVIEW,image.toPNG());}process.stdout.write(JSON.stringify({test:'hidden-overlay',focused:win.isFocused(),visible:win.isVisible()})+'\n');app.quit();},200));
+ if(process.env.TIM_VOICE_OVERLAY_PORT&&process.env.TIM_VOICE_OVERLAY_TOKEN){
+ connection=require('node:net').createConnection({host:'127.0.0.1',port:Number(process.env.TIM_VOICE_OVERLAY_PORT)},()=>connection.write(JSON.stringify({token:process.env.TIM_VOICE_OVERLAY_TOKEN})+'\n'));
+ let buffer='';connection.on('data',chunk=>{buffer+=chunk;if(buffer.length>16384){connection.destroy();return;}let at;while((at=buffer.indexOf('\n'))>=0){const line=buffer.slice(0,at);buffer=buffer.slice(at+1);try{const state=JSON.parse(line);if(state.control==='show'){win.showInactive();continue;}if(['muted','listening','processing','error','stopped'].includes(state.state))win.webContents.send('voice-state',latest={state:state.state,listening:state.listening===true,hood:typeof state.hood==='string'?state.hood.slice(0,4000):''});}catch{connection.destroy();}}});
+ connection.on('error',()=>{});connection.on('close',()=>{if(!win.isDestroyed())win.webContents.send('voice-state',{state:'error',listening:false});setTimeout(()=>app.quit(),300);});
+ }
+
+});app.on('window-all-closed',()=>app.quit());

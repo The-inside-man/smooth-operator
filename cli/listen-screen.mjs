@@ -1,6 +1,7 @@
+import {useSafeInput as useInput} from './terminal-boundary.mjs';
 import {activity,useClock,boundary} from './activity.mjs';
 import React,{useState,useEffect} from 'react';
-import {Box,Text,useInput} from 'ink';
+import {Box,Text} from 'ink';
 import {RawListener,listenerConfig} from './listener.mjs';
 import {modelIntent} from './planner.mjs';
 import {clean} from './core.mjs';

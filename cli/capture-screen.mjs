@@ -1,6 +1,7 @@
+import {useSafeInput as useInput} from './terminal-boundary.mjs';
 import {boundary,useClock} from './activity.mjs';
 import React,{useState,useEffect} from 'react';
-import {Box,Text,useInput} from 'ink';
+import {Box,Text} from 'ink';
 import {ToolScreen} from './tool-screen.mjs';
 import {readRegistry,discoverTools} from './tool-runner.mjs';
 import {captureReview} from './capture.mjs';

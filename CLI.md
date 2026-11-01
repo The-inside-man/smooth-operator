@@ -24,7 +24,7 @@ tim --url http://127.0.0.1:PORT
 
 Normal startup owns an ephemeral loopback-only backend and closes it on exit. `--url` attaches to an existing backend without stopping it. Concurrent owned instances cannot share a data directory. After a crash, inspect a stale `cli.lock` before manually removing it. Models are not downloaded or run on startup. Missing models produce setup guidance; `--demo` is sample data. Noninteractive use prints guidance and never silently approves an action.
 
-Ctrl+S sends; Enter inserts a newline; Esc cancels; Ctrl+Q quits. `/help`, `/models`, `/model N`, `/agent N`, `/sessions` and `/tools` expose controls. `NO_COLOR=1` disables color; `TIM_ASCII=1` selects ASCII borders. The enlarged hero subtitle uses bold, tracked terminal cells, not independent font scaling.
+Enter sends (Ctrl+S is an alias); Ctrl+J inserts a newline; Esc cancels; Ctrl+Q quits. `/help`, `/models`, `/model N`, `/agent N`, `/sessions` and `/tools` expose controls. `NO_COLOR=1` disables color; `TIM_ASCII=1` selects ASCII borders. The enlarged hero subtitle uses bold, tracked terminal cells, not independent font scaling.
 
 ## Provider selection and activity
 
@@ -133,3 +133,337 @@ Execution currently supports Node ES modules without declared external dependenc
 Development uses mocked model/API responses, harmless local processes, synthetic captures and localhost sockets. No real target package installation, external scan, live host capture, model inference or RI/GPU work is part of validation. Windows isolated installation, repeated GUI-free backend lifecycle, toolbox persistence and synthetic-terminal cleanup are checked. Manager adapters use argv/metadata fixtures; non-Windows native execution and real-model behavior remain unverified.
 
 Preview images rasterize actual Ink output with ANSI colors. They are not native-terminal screenshots. Panel/frame borders use bright phosphor-green double lines (ASCII fallback available), with a distinct brighter composer border and amber sending state. The approved wordmark and hoodie remain unchanged; the amber prompt includes the leading `>`.
+
+## User-level installer (Windows, macOS and Linux)
+
+`npm.cmd run pack:cli` on Windows (`npm run pack:cli` on Unix) creates `artifacts/tim-studio-installer/`: keep all files in
+that folder together. It contains the verified package, SHA-256 manifest, common
+installer engine and platform scripts. No published npm package or release URL
+is assumed. Obtain the whole folder from a trusted distributor; the adjacent
+checksum detects corruption, not a malicious replacement of the whole bundle.
+
+Install Node.js 24 or newer **with npm** from https://nodejs.org/en/download first.
+The scripts check prerequisites and give instructions if unavailable; they never
+install a runtime, elevate privileges or change execution policy automatically.
+Package dependencies are fetched through your configured npm registry/cache;
+lifecycle scripts are disabled. Installation does not launch a model or GUI.
+
+Windows PowerShell or Command Prompt, from the extracted distribution folder (works when PowerShell script files are disabled):
+
+```powershell
+.\install-tim.cmd
+# Open a new terminal, then:
+tim
+```
+
+From the repository root, no ZIP extraction is needed:
+
+```powershell
+npm.cmd run pack:cli
+.\artifacts\tim-studio-installer\install-tim.cmd
+```
+
+The CMD entry runs Node directly and accepts `--prefix`, `--package`, `--sha256`,
+`--rollback` and `--uninstall`. It does not run the PowerShell installer script
+or change execution policy. The Node core uses a small inline Windows API call
+for User PATH only, with no encoded command or policy override. Restart the
+terminal after CMD installation because the caller's process PATH is unchanged.
+If `npm` selects a blocked `npm.ps1`, use `npm.cmd`; npm is already installed.
+
+Optional PowerShell script entry (when local script policy permits), from the distribution folder:
+
+```powershell
+.\install-tim.ps1
+# Optional user-owned destination:
+.\install-tim.ps1 -Prefix "$env:LOCALAPPDATA\My Tools\TIM"
+tim --help
+```
+
+Default Windows destination: `%LOCALAPPDATA%\TIMStudio\cli`. The installer adds
+its `bin` directory to **User PATH**, preserves existing entries and updates the
+calling PowerShell process PATH. Open a new terminal for other applications.
+If local script execution is restricted, follow your organization's policy; the
+installer does not weaken it. Alternatively run `node .\installer.mjs` from the
+bundle, then open a new terminal (same user-level installation, no policy change).
+
+macOS/Linux, from the distribution folder:
+
+```sh
+sh ./install-tim.sh --shell zsh   # macOS default; select your actual shell
+sh ./install-tim.sh --shell bash # Linux bash users
+# fish users: --shell fish
+# Optional: --prefix "$HOME/My Tools/TIM"
+```
+
+Default Unix destination: `$XDG_DATA_HOME/tim-studio/cli`, or
+`$HOME/.local/share/tim-studio/cli`. The detected `$SHELL` is used if `--shell` is
+omitted. Bash gets an owned block in `.bashrc` and its selected login profile;
+zsh in `.zshrc`/`.zprofile` (honoring `ZDOTDIR`); fish gets an owned `conf.d` file
+(honoring `XDG_CONFIG_HOME`). Open a new shell or source the reported profile.
+An executed script cannot change its parent shell's environment. Other shells
+require an explicit supported shell selection or manual PATH configuration;
+no unrelated profile is silently chosen. Unix command names are case-sensitive:
+use `tim`. No provider keys or other secrets are written by this installer.
+
+Repeat the same command to update from a new bundle. An identical package is
+idempotent. A new package is installed in an isolated release directory and its
+CLI version check must succeed before activation; failed activation restores
+prior managed files/PATH. Previous releases remain for rollback:
+
+```powershell
+.\install-tim.ps1 -Rollback
+.\install-tim.ps1 -Uninstall
+```
+
+```sh
+sh ./install-tim.sh --rollback
+sh ./install-tim.sh --uninstall
+```
+
+Pass the same `-Prefix`/`--prefix` for a custom destination on later operations.
+Rollback switches to the previous successful release. Uninstall removes only
+owned releases/launchers and exact managed PATH blocks/entries, preserving
+unrelated files and preexisting PATH entries. Modified launcher files or profile
+blocks require manual reconciliation; the installer refuses to overwrite them.
+Filesystem failures during uninstall may require retry/manual cleanup; uninstall
+is not a transactional backup of release contents. A stale `.install.lock`
+after an interrupted process requires checking that no installer is running
+before removing that lock. Existing `tim` commands on PATH are reported as
+collisions rather than replaced. System PATH, administrator settings, firewalls
+and model/provider configuration are never modified.
+
+For a separately supplied local archive, use `-Package <file> -Sha256 <hash>`
+(PowerShell) or `--package <file> --sha256 <hash>` (shell). Verify the hash through
+a trusted channel. Do not use arbitrary archives or model-generated installer
+commands. Development-only `--sandbox <directory>` / `-SandboxRoot <directory>`
+redirects profiles and Windows PATH to an isolated directory/JSON mock; it is
+not a real host installation. `--platform` is allowed only in that sandbox.
+
+Validation: actual Windows wrapper/Node installer with isolated prefixes and
+mock user PATH; Git Bash wrapper smoke test; bash/zsh/fish profile generation,
+repeat/update/rollback/uninstall, collisions, missing prerequisites, read-only
+profiles, checksum rejection and failed activation tests. Native macOS/Linux,
+fish/zsh execution and real Windows registry writes have not been exercised.
+
+## Responsive terminal and natural requests
+
+The welcome view centers its art group and uses large, compact and small ASCII
+variants according to both available rows and columns. Empty cards are capped;
+the composer remains pinned during resize and streaming. Enter sends, Ctrl+S
+is an alias, and Ctrl+J (or Alt+Enter where delivered) inserts a newline.
+Bracketed multiline paste never submits. BS/DEL Backspace, forward Delete,
+grapheme-aware arrows/deletion, Home/End, Ctrl+Left/Right, Ctrl+W, Ctrl+U and
+Ctrl+K support ordinary editing. Shift+Enter is not assumed portable.
+
+```powershell
+tim check port 999
+tim "go get me all the images at https://example.com/gallery"
+```
+
+Unknown non-option arguments form an initial natural-language request; unknown
+flags still produce helpful validation errors. The selected local/OpenAI/xAI
+model proposes a closed typed intent. Local port ownership/socket inspection
+uses installed netstat, ss or lsof, executes read-only without an extra approval
+prompt, and displays actual output/exit status. It does not connect to targets,
+scan, capture traffic or invent bandwidth statistics. Unsupported/ambiguous
+requests ask for clarification or offer toolbox recall and a stored, unexecuted
+script draft. Inspect drafts with `tim toolbox show ID`, then explicitly review
+`tim toolbox run ID`. Generated code is never executed merely because the model
+suggested it. Install/listen intents open their existing review workflows.
+
+Image requests show the single public page and a fresh destination for approval
+before fetching or writing. A built-in reviewed downloader handles img src,
+srcset and common lazy attributes, relative URLs, redirects and deduplication.
+It rejects private/loopback/metadata destinations and credentials in URLs,
+pins resolved public addresses, caps page/image/total sizes and duration, never
+overwrites an existing destination, and saves a manifest including failures.
+Downloads are sequential (one concurrent request); no JavaScript evaluation,
+CSS backgrounds, SVG, authenticated sessions or whole-site crawling is claimed.
+A cancellation keeps completed images and a partial manifest. Page contents and
+image bytes are never supplied to the model. Local inspection output likewise
+stays in the terminal, separate from subsequent model clarification requests.
+
+Provider/model IDs (not keys) persist in `cli-selection.json` under the selected
+TIM data directory. Explicit flags/environment override saved choices. The UI
+shows the selected provider and cloud boundary. A missing model preserves the
+request and gives model-selection guidance; no silent cloud fallback occurs.
+Noninteractive natural requests are displayed with interactive-start guidance
+and do not execute actions.
+
+
+## Opt-in voice and optional overlay
+
+```powershell
+npm.cmd run build:voice       # existing Windows .NET Framework compiler only
+node cli/index.mjs voice --devices  # metadata only; does not open microphone
+tim voice                    # starts MUTED; type unmute to explicitly listen
+tim voice --listen           # explicit microphone activation
+tim voice --overlay --electron C:\path\to\electron.exe
+```
+
+The packaged Windows adapter uses installed System.Speech for local dictation;
+no audio is sent to a cloud transcriber. It supports the Windows **default**
+recording device only; select another default in Windows settings yourself.
+`--language CULTURE` selects an installed recognition language. Missing language,
+permission or device produces Error/Unavailable, never a fake Listening state.
+Other platforms need an explicitly configured trusted local `--adapter PATH`.
+Adapter protocol: `--devices` outputs metadata; normal execution emits bounded
+JSON lines `{type:"ready"}`, `{type:"transcript",id,final:true,text,confidence}`
+or `{type:"error",message}`. `TIM_VOICE_DEVICE`/`TIM_VOICE_LANGUAGE` are forwarded.
+No runtime, microphone permission or language pack is silently installed.
+
+Only confident final transcripts beginning with “TIM ” enter the same typed
+planner. Partial/low-confidence/duplicate/ambient transcripts are ignored.
+“TIM cancel”, “TIM mute” and “TIM stop” control the session. Muting closes the
+capture process; resume through the overlay or terminal `unmute` (a muted
+microphone cannot hear a resume command). No TTS is implemented, avoiding a
+speech feedback loop. Wake phrases are not speaker authentication. Reviewed
+image/package actions require an exact pending approval code; listening alone
+never grants mutation authority. Listener takeover and generated scripts retain
+their terminal/source-review workflows. Voice request transcripts may go to the
+selected cloud model; audio, desktop screenshots and local output do not.
+
+Background voice never injects keys/mouse events, activates windows or restores
+focus. Output remains in its own console. Optional Electron overlay controls
+Mute/Listen/Stop/Hide and reflects real adapter state via an authenticated
+loopback-only, bounded-message channel. It uses `focusable:false` and
+`showInactive()`, has no remote content/Node renderer access, and requests no
+browser permissions. Hiding it does not mute; type `show` in the voice terminal
+to reopen. Electron is optional and is not included in the standalone CLI.
+Native hidden-window rendering was checked; visible control-click/focus behavior
+and live microphone accuracy still require explicit user testing. Other desktop
+platforms' focus policies are not claimed verified.
+
+## Explicit desktop control boundary
+
+`tim control --capabilities` reports the current disabled/native-adapter status.
+A bounded Windows adapter is compiled with the existing .NET Framework and included in Windows-built packages. macOS/Linux have optional semantic AX/AT-SPI adapters with dependencies and native validation still outstanding; see PLATFORM-SUPPORT.md. Windows supports an already-open target PID, focus, target-relative click, Unicode typing and key chords, with a nonactivating Stop indicator. Native input/hook behavior is **not exercised on the user desktop**; this is not verified arbitrary-app automation. iMovie/music-production tasks are not claimed tested.
+
+`tim control --plan REVIEWED_JSON` on Windows, or
+`tim control --adapter ABSOLUTE_EXECUTABLE --plan REVIEWED_JSON` with another trusted adapter presents the task,
+PID and bounded steps, requires a fresh exact token, then confirms each step.
+The adapter must declare native emergency-stop and manual-input interruption
+support; otherwise control is refused. Plans allow observe/focus/click/type/key/
+wait only, at most 20 steps/60 seconds, with target PID/window-handle checks and verification after each step. The Windows adapter verifies window presence/foreground, not completion of the requested application task; the user must verify semantic results. Errors, cancellation, target changes and interruptions revoke approval
+and call releaseAll. Native permission changes are never automatic. Background
+voice cannot grant takeover; launch the explicit terminal review separately.
+
+Adapter JSON-line RPC methods are capabilities/observe/act/verify/releaseAll;
+responses use `{id,result}` or `{id,error}`. EmergencyStop/manualInput events
+revoke authority. Observations remain local; no screenshot/model upload is
+implemented. Target-relative coordinates and permission reporting are the
+adapter's responsibility. Sensitive messages/purchases/deletion/credentials and
+security settings require a separate specific review, not generic takeover.
+
+## Tor routing and prerequisites
+
+```powershell
+tim --route tor --socks 127.0.0.1:9050 "get images at https://example.com/gallery"
+tim --route direct "get images at https://example.com/gallery"
+tim dependencies list
+tim dependencies tor
+tim dependencies tor --download --destination C:\Users\me\Downloads\TIM-Prerequisites
+tim dependencies node --version v24.22.2 --download --destination C:\Users\me\Downloads\TIM-Prerequisites
+tim silent
+```
+
+Tor mode uses an existing loopback SOCKS service. It never starts/installs Tor,
+changes system proxies or falls back to direct networking. Only the built-in
+page/image downloader is covered, with local model planning; cloud providers,
+external tools and package managers are blocked as unsupported in this mode.
+The image review/status identifies Direct/Tor. SOCKS failures leave it unavailable.
+No actual Tor connection or onion visit was used in development.
+
+The prerequisite catalog distinguishes the **Tor client/expert bundle** needed
+for SOCKS from Tor Browser. It resolves supported platform/architecture links
+from official vendor metadata, shows license/purpose/version/verification and
+requires a separate download-only confirmation plus destination. Tor signatures
+are downloaded beside the archive but **not automatically authenticated**;
+verify them before installing. Node archives are checked against official HTTPS
+SHA-256 metadata; signer authentication remains a separate step. Unknown sizes
+are reported as unknown until transfer metadata arrives. Unsupported or ambiguous
+metadata yields the official page/manual instructions. No model-provided binary
+URL, execution, elevation, service startup or firewall change is accepted.
+
+**Silent Mode does not guarantee anonymity.** Whole-machine lockdown is
+preflight/design only; see [SILENT-MODE.md](SILENT-MODE.md). Logins, identifying
+content, fingerprinting and traffic outside covered TIM operations remain risks.
+
+Implementation references: [System.Speech](https://learn.microsoft.com/en-us/dotnet/api/system.speech.recognition.speechrecognitionengine),
+[Electron BrowserWindow](https://www.electronjs.org/docs/latest/api/browser-window),
+[Tor SOCKS specification](https://spec.torproject.org/socks-extensions.html),
+[official Tor client downloads](https://download.torproject.org/tor/).
+
+## Expanded-feature acceptance and remaining limits
+
+| Command | Implemented scope | Verification / limit |
+| --- | --- | --- |
+| `tim "check port 999"` | Configured model selects validated local TCP/UDP inspection; displays actual local tool output. | Mock HTTP planner to real localhost fixture tested. No external scan or payload upload. |
+| `tim "get images at https://example.com/gallery"` | One HTML page, src/srcset/lazy attributes; reviewed new destination, bounded downloads and manifest. | Synthetic HTTP fixtures tested. No JS, CSS backgrounds, authentication or site crawl. |
+| `tim dependencies list` / `tim dependencies tor` | Required/optional official prerequisite catalog and supported OS/architecture metadata. | Ambiguous assets yield manual guidance. Catalog listing is offline; metadata resolution uses public HTTPS. |
+| `tim dependencies node --version VERSION --download --destination ABS_PATH` | Download-only confirmation, checksum validation, no overwrite/install/start. | Fixture metadata/downloads tested; Tor signatures require separate authentication. |
+| `tim --route tor --socks 127.0.0.1:9050 "get images at URL"` | Downloader and redirects/assets over existing SOCKS; remote DNS via Tor RESOLVE; v3 onion support; fail closed. | Mock SOCKS tested, no real Tor connection. Requires local model; cloud providers and unrelated tool/package routes blocked. |
+| `tim voice` / `tim voice --listen` | Muted startup or explicit listening; wake phrase, final/confident transcripts, mute/cancel/stop and pending approval codes. | Subprocess fixture tested. Windows default recording device only; live mic untested. Other platforms require adapter. |
+| `tim voice --overlay --electron ABS_PATH` | Hood overlay, real state and mute/listen/stop/hide over authenticated local IPC. | Hidden native rendering checked; visible click/focus behavior untested. No background input injection. |
+| `tim control --plan REVIEWED_JSON` | Target PID, task token, per-step approval, bounded observe/act/verify, interruption contract and input release. | Subprocess RPC fixture tested; Windows UIA observation/cancellation passed in an isolated live fixture; input attempt stopped at Foreground unavailable. Positive native input remains unverified. |
+| `tim silent` | Read-only warning and design/preflight status. | No whole-host Tor/firewall/DNS/IPv6/routing changes implemented. |
+
+Desktop targets are re-observed after step approval. Native input is bound to the
+approved window handle and stops if foreground focus changes during input.
+
+Desktop natural-language requests now open a semantic review workflow. See [PLATFORM-SUPPORT.md](PLATFORM-SUPPORT.md) for the model-assisted loop, optional native adapters and precise unverified limits.
+
+CLI entry points are exercised for routing and noninteractive refusal. Desktop
+command tests use a harmless JSON-line subprocess, including declined approval;
+voice command tests use a capture-event subprocess with no audio. These do not
+verify live OS input, microphone accuracy, or arbitrary-app success.
+
+## Final review checklist
+
+- [x] Terminal minimum is 80 columns and 16 rows. Below it, TIM shows measured/required size, preserves mounted draft/cursor/session/job state, blocks typing/submission/approval, and keeps Esc cancellation and Ctrl+Q/Ctrl+C available. Resizing restores the existing view. TIM never resizes the OS window or changes fonts. Extremely tiny views show only what fits; escape/quit remain active.
+- [x] Enter submits; Backspace/Delete, grapheme editing, multiline paste and resize preserve input.
+- [x] Natural-language fallback routes typed validated actions; local port output, bounded image downloads, toolbox recall and dependency offers have fixture coverage.
+- [x] Opt-in voice/overlay and reviewed desktop plans have explicit approval boundaries. No arbitrary-app semantic automation or verified live microphone/native input claim.
+- [x] Tor coverage is limited to built-in fetch transport; unsupported routes fail closed. Silent Mode is preflight/design only and does not guarantee anonymity.
+- [x] Standalone user installers, source guide and local package are included. Native macOS/Linux and visible overlay/focus testing remain outstanding.
+
+Noninteractive help/version and safe refusal paths do not require a 80-column terminal.
+
+## Model-assisted desktop and decorative animation
+
+Run tim control --task "REQUEST" --target-pid PID --adapter native, or enter a natural-language request in the TUI. A trusted custom semantic adapter can be selected by absolute path. The loop observes, proposes typed actions, obtains exact approvals, executes and checks a fresh semantic predicate. Each cloud observation is separately reviewed before transmission. Background voice supplies an explicit foreground handoff, never automatic takeover. [Platform matrix and live test plan](PLATFORM-SUPPORT.md) distinguish compiled/mocked code from native proof.
+
+
+Portable voice uses tim voice --portable with installed sounddevice/Vosk and a user-selected local model directory. The command tim silent plan --platform win32|darwin|linux [--snapshot FILE] emits an inactive plan only; privileged execution and automatic host lockdown are disabled.
+
+### Responsive welcome artwork
+
+
+
+## Optional Node prerequisite bootstrap
+
+The distribution includes bootstrap-node.ps1 (Windows) and bootstrap-node.sh (macOS/Linux). Choose an explicit Node 24+ version from https://nodejs.org/en/download and an absolute NEW user directory. Run with -Plan or --plan first to inspect exact official source and destination without network access. Execution requires typing install; it downloads only from nodejs.org, verifies the archive against official HTTPS SHA-256 metadata, and extracts into that new directory. It does not independently authenticate the release signer, change PATH/profiles, elevate, install TIM, or execute the downloaded runtime. Use the resulting node.exe/bin/node explicitly with installer.mjs; the TIM launcher records that runtime path. Keep the runtime directory in place.
+
+Windows: .\bootstrap-node.ps1 -Version VERSION -Destination ABSOLUTE_NEW_DIRECTORY -Plan. This script respects PowerShell policy; if blocked, use the official Node installer manually. No policy-bypass wrapper is supplied. macOS/Linux: sh ./bootstrap-node.sh VERSION ABSOLUTE_NEW_DIRECTORY --plan. Remove the plan flag only when ready for the reviewed download/extraction. Native macOS/Linux bootstrap remains unverified.
+
+Silent Mode now also exports a test-only Linux namespace nftables/Tor policy: tim silent policy --platform linux --namespace tim-lab --tor-uid 990 --app-uid 1000. It is proxy-only within that namespace; no host executor or --apply exists. See SILENT-MODE.md for blocked traffic, lifecycle tests and pending native validation.
+
+Offline detached signatures can now be checked with tim dependencies verify --file ABS_ARCHIVE --signature ABS_ASC --keyring ABS_TRUSTED_KEYRING --fingerprint FULL_40_HEX_FINGERPRINT. Requires already-installed gpgv; no keys are fetched/imported and no verifier is installed automatically. Obtain the exact signer fingerprint independently from the correct vendor/product documentation. Verification uses an isolated temporary keyring home and rejects fingerprint mismatch, expired signature timestamps and any error/revocation status reported by the verifier. gpgv trusts supplied keys and does not independently establish their current expiry/revocation or vendor ownership; keep that trust anchor independently verified and current. Success is a cryptographic signature check against that selected anchor, not vendor certification. Tor bundle downloads remain unverified until this separate check succeeds.
+
+TIM built-in Tor downloads now use fresh RFC 1929 SOCKS authentication values per download operation, shared by its remote DNS, redirects and assets, then discarded. The Tor service must support username/password negotiation and keep IsolateSOCKSAuth enabled. An endpoint offering only no-auth is refused without downgrade. Mock protocol tests verify grouping/separation and refusal; no live circuit-isolation claim is made. These generated values are isolation labels, not account credentials, and are not written to the manifest.
+
+Welcome artwork uses a fixed-cell diagonal fabric highlight (about five seconds per cycle), with no glyph substitutions or face illumination. It continues while idle or typing; --no-animation, TIM_REDUCED_MOTION=1 and NO_COLOR disable it. Compact tall windows use content-driven hero spacing and shorter captions.
+
+Supported terminal minimum: 80 columns by 16 rows. Welcome art remains visible at every supported width. At 80–99 columns, tall screens stack the detailed 44-column hoodie with the established 48-column outlined logo; 24-row screens retain the same complete hoodie beside a narrower outlined TIM/studio wordmark. Optional panels/captions yield before input. At extremely short heights (16–22 rows, depending on draft height), reduced-detail 5- or 9-row hood art preserves a hidden face and shoulders beside outlined TIM. This cannot retain the full portrait detail at those physical dimensions. Below 80 columns or 16 rows, the size guard preserves state and cancellation. Active tasks still prioritize their output view.
+
+Compact typography uses an 11-row hollow slab-serif TIM over a distinct 7-row lowercase studio, separated by one blank row; captions use normal word spacing. Short windows select the narrower outlined wordmark so art and input remain visible.
+
+### Multiple terminal windows
+
+Run `tim` normally in each window. Compatible CLI builds sharing the same data directory attach to one authenticated loopback backend and create independent conversations. The helper owns the exclusive writer lock; closing one window releases only its lease. The last window closes the helper after a short grace period. A crashed client lease expires after approximately 45 seconds. No PID read from discovery is terminated during recovery. Suspended/disconnected clients may need to restart after lease expiry.
+
+Discovery records are private files with random credentials and a protocol/source-build identity. Changed builds or conflicting model-library selections fail clearly; close old windows normally before upgrading. Old pre-sharing CLI locks cannot be safely attached automatically: close that older CLI once, then start the updated CLI in multiple windows. A stale writer lock is recovered only under the startup gate after its PID is proven absent. Reused/live/permission-unknown PIDs, malformed records and ambiguous startup guards are preserved rather than guessed away. An abandoned `cli-start.lock` requires owner investigation; TIM does not automatically delete it.
+
+`--data-dir` still selects an isolated backend/data set. `--url` remains an explicit attachment to an independently managed server and does not stop that server. To use automatic authentication/leases for TIM-managed helpers, omit `--url`. Sessions and model resources share one backend, so conversation isolation does not mean separate model memory or simultaneous GPU inference. No arbitrary number of windows is guaranteed beyond machine resources.
+
+Mac after pulling: install Node.js 24+ with npm, run `npm ci`, then `npm run build`. Run `node cli/index.mjs` in each terminal for the repository version. For a user-level installation, run `npm run pack:cli`, then `sh artifacts/tim-studio-installer/install-tim.sh` and follow its review prompts. Native macOS multi-window/installer behavior has not been verified on this Windows host; optional speech/desktop-control dependencies and OS permissions remain separate from the terminal CLI.

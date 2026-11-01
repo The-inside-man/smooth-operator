@@ -33,7 +33,7 @@ async function fileResponse(req, res, filename, download = false) {
   const stream = createReadStream(filename, { start, end });
   stream.on('error', () => res.destroy()); res.on('close', () => stream.destroy()); stream.pipe(res);
 }
-export async function startServer({ port = 4317, dataDir = process.env.TIM_DATA_DIR || path.join(root, 'data'), staticDir = path.join(root, 'dist'), autoSetup = process.env.TIM_AUTO_SETUP !== '0', telemetry = true, libraryRoot } = {}) {
+export async function startServer({ port = 4317, dataDir = process.env.TIM_DATA_DIR || path.join(root, 'data'), staticDir = path.join(root, 'dist'), autoSetup = process.env.TIM_AUTO_SETUP !== '0', telemetry = true, libraryRoot, authToken, management } = {}) {
   const studio = new Studio(dataDir); studio.on('error', error => console.error('Studio:', error.message)); await studio.init({ telemetry, libraryRoot });
   const clients = new Set();
   const server = http.createServer(async (req, res) => {
@@ -41,6 +41,7 @@ export async function startServer({ port = 4317, dataDir = process.env.TIM_DATA_
     const actualPort = server.address().port;
     const hosts = [`127.0.0.1:${actualPort}`, `localhost:${actualPort}`];
     if (!hosts.includes(req.headers.host)) return json(res, { error: 'Local requests only.' }, 403);
+    if (authToken && req.headers.authorization !== 'Bearer '+authToken) return json(res,{error:'Backend authentication required.'},401);
     const url = new URL(req.url, `http://${req.headers.host}`);
     const origin = req.headers.origin;
     const allowed = [`http://127.0.0.1:${actualPort}`, `http://localhost:${actualPort}`];
@@ -48,6 +49,7 @@ export async function startServer({ port = 4317, dataDir = process.env.TIM_DATA_
     if (origin && !allowed.includes(origin)) return json(res, { error: 'Invalid origin.' }, 403);
     if (!['GET', 'HEAD'].includes(req.method) && req.headers['x-tim-request'] !== '1') return json(res, { error: 'Invalid request.' }, 403);
     try {
+      if (management && await management(req,res,studio)) return;
       if (url.pathname === '/api/provider-models' && req.method === 'POST') return json(res, {models:await listCloudModels((await body(req)).provider)});
       if (url.pathname === '/api/timing/reset' && req.method === 'POST') { await studio.resetTimings(); return json(res,{ok:true}); }
       if (url.pathname === '/api/state') return json(res, studio.snapshot());

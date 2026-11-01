@@ -1,0 +1,1 @@
+const {contextBridge,ipcRenderer}=require('electron');contextBridge.exposeInMainWorld('timVoice',{control:action=>{if(['mute','unmute','stop','hide'].includes(action))ipcRenderer.send('voice-control',action);},onState:callback=>ipcRenderer.on('voice-state',(_e,state)=>callback(state))});

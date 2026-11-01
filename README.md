@@ -275,3 +275,19 @@ For source development use `npm run cli`, `npm run cli -- --demo` or `npm run cl
 See [CLI.md](CLI.md) for keyboard controls, package-manager support, `tim install`, local listeners, offline PCAP inspection, user-selected toolbox storage and exact limitations. All system actions require explicit review. Model proposals never become arbitrary shell commands. No models or packages are installed on startup.
 
 `npm test` covers protocol, editor, responsive renders, local process/socket fixtures, planner validation and synthetic-terminal cleanup. `node scripts/preview-cli.mjs` produces the color-faithful Ink component preview using Edge; it is not native terminal QA.
+
+### Install the terminal CLI without the graphical app
+
+Build a local installer bundle with `npm.cmd run pack:cli` on Windows (`npm run pack:cli` on Unix). In
+`artifacts/tim-studio-installer`, run `.\install-tim.cmd` on Windows
+or `sh ./install-tim.sh --shell bash` (or `zsh`/`fish`) on macOS/Linux.
+Node.js 24+ with npm is required. The scripts install per user, configure only
+user PATH/profile entries, and support repeat updates, rollback and uninstall.
+See [CLI installer instructions and platform validation limits](CLI.md#user-level-installer-windows-macos-and-linux).
+
+The CLI accepts natural requests such as `tim check port 999`, uses Enter to submit,
+and adapts to half-screen terminals at least 100 columns wide and 16 rows tall. Below that size it preserves drafts/jobs, pauses typing and approvals, and keeps cancel/quit available. See [CLI.md](CLI.md) for bounded actions,
+opt-in voice/overlay, explicit desktop-control approvals, prerequisite downloads
+and Tor routing coverage. [Silent Mode](SILENT-MODE.md) is design/preflight only
+and does not guarantee anonymity. Native voice/input adapters remain unverified
+against real user microphone/application tasks.
