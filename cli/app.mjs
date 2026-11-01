@@ -1,4 +1,5 @@
-import {shimmerRuns,useShimmer,reducedMotion} from './animation.mjs';
+import {useShimmer,reducedMotion} from './animation.mjs';
+import {sceneRuns} from './scene.mjs';
 import {DesktopScreen} from './desktop-screen.mjs';
 import {usableTerminal,WidthMessage} from './terminal-boundary.mjs';
 import {ImageScreen} from './image-screen.mjs';
@@ -6,18 +7,17 @@ import {naturalRequest} from './natural.mjs';
 import {InstallScreen} from './install-screen.mjs';
 import {ListenScreen} from './listen-screen.mjs';
 import {useEditorInput} from './editor-input.mjs';
-import {layout,wrapCells,smallHood,smallLogo,microHood,shortLogo} from './layout.mjs';
+import {layout,wrapCells} from './layout.mjs';
 import {activity,useClock,boundary} from './activity.mjs';
 import React, {useState,useEffect,useRef} from 'react';
 import {Box,Text,useInput,useCursor,useStdout} from 'ink';
 import {clean,edit,demoState} from './core.mjs';
-import {hood,compactHood} from './art.mjs';
+import {portraitForLayout,asciiPortrait} from './art.mjs';
 import {ToolScreen} from './tool-screen.mjs';
 import {retroWordmark} from './retro.mjs';
 const h=React.createElement, green='#C5F7D4', muted='#758D80', amber='#DAA85A';
 const text=(value,props={})=>h(Text,{color:green,wrap:'truncate',...props},clean(value));
-const portrait=(value,frame)=>h(Text,{color:'#8EE8AA'},...shimmerRuns(value,frame).map((run,i)=>h(Text,{key:i,color:run.color},run.text)));
-const lettering=large=>text(retroWordmark({large}),{color:'#8EE8AA'});
+const scene=(options,frame)=>h(Text,{wrap:'truncate'},...sceneRuns(options,frame).map((run,i)=>h(Text,{key:i,color:run.color,backgroundColor:run.backgroundColor,bold:run.bold},run.text)));
 const tracked=(value,width)=>{const spaced=[...value].join(' ');return spaced.length<=width?spaced:value;};
 const panel=(title,children,props={})=>h(Box,{borderStyle:process.env.TIM_ASCII==='1'?'classic':'double',borderColor:'#8EE8AA',flexDirection:'column',paddingX:1,...props},text(title,{color:'#8EE8AA'}),...children);
 export const help='/eta-reset  /reconnect  /retry  /tools  /agent N  /home  /new  /sessions  /session N  /models  /model N  /mode agent|chat|code  /help';
@@ -74,14 +74,22 @@ export function App({client,demo=false,onQuit,initial=demoState,staticPreview=fa
  const spare=availablePanelHeight-panelHeight+heroSpare;
  const sidePanels=hero&&size.w>=100,bodyHeight=Math.max(0,panelHeight-3);
  const narrowArt=['narrow','small','micro'].includes(variant);
- const mark=narrowArt?(variant==='micro'||variant==='small'?shortLogo:smallLogo):retroWordmark({large});
+ const wordmarkOptions={variant:narrowArt?(variant==='micro'||variant==='small'?'short':'narrow'):large?'large':'compact',ascii:process.env.TIM_ASCII==='1'};
+ const mark=retroWordmark(wordmarkOptions);
  const logoWidth=Math.max(...mark.split('\n').map(line=>line.length));
- const heroArt=variant==='micro'?microHood:variant==='small'?smallHood:large||variant==='balanced'?hood:compactHood;
+ const selectedArt=portraitForLayout({variant,heroHeight});
+ const heroArt=process.env.TIM_ASCII==='1'||Object.hasOwn(process.env,'NO_COLOR')||process.env.FORCE_COLOR==='0'?asciiPortrait(selectedArt):selectedArt;
  const logoTop=large?1:variant==='balanced'?1:0;
  const rightHeroHeight=Math.min(heroHeight,logoTop+mark.split('\n').length+(showHeroCopy?3:0));
  const groupWidth=Math.max(...heroArt.split('\n').map(line=>line.length))+logoWidth+(large?5:4);
  const heroLeft=Math.max(0,Math.floor((size.w-2-groupWidth)/2));
  const portraitPadding=Math.max(0,rightHeroHeight-heroArt.split('\n').length);
+ const artWidth=Math.max(...heroArt.split('\n').map(line=>line.length)),stacked=variant==='stacked';
+ const sceneOptions={width:size.w-2,height:heroHeight,art:heroArt,
+  portraitX:stacked?Math.floor((size.w-2-artWidth)/2):heroLeft,portraitY:stacked?0:portraitPadding,
+  wordmarkX:stacked?Math.floor((size.w-2-logoWidth)/2):heroLeft+artWidth+(large?5:4),wordmarkY:stacked?heroArt.split('\n').length+1:logoTop,wordmarkOptions,
+  caption:showHeroCopy?[large?tracked('YOUR WORK. ONE TERMINAL.',logoWidth):'YOUR WORK. ONE TERMINAL.',large?tracked('> What are we building?',logoWidth):'> What are we building?']:null,
+  captionY:(stacked?heroArt.split('\n').length+1:logoTop)+mark.split('\n').length+1};
  const content=(localMessages.length?localMessages:session?.messages||[]).map(m=>`${m.role==='user'?'YOU':'TIM'}${m.status?' / '+m.status:''}\n${m.content||'Waiting for response.'}${m.error?'\n'+m.error:''}${m.artifact?'\nArtifact: '+m.artifact.filename:''}${m.steps?.length?'\n'+m.steps.map(s=>`${s.status}: ${s.tool||s.kind} - ${s.phase||''}`).join('\n'):''}`).join('\n\n')||'No task running.\n\nStart with a request below.';
  const width=Math.max(1,size.w-(wide&&!hero?38:6)),lines=clean(notice.includes('\n')?notice:content).split('\n').flatMap(line=>wrapCells(line,width).lines);
  const visible=lines.slice(Math.max(0,lines.length-bodyHeight-scroll),Math.max(0,lines.length-scroll));
@@ -100,7 +108,7 @@ export function App({client,demo=false,onQuit,initial=demoState,staticPreview=fa
    headerHeight>=3?h(Box,{justifyContent:'space-between'},text('smooth-operator',{color:muted}),text(active?active.phase:cloud?'Typed requests sent to cloud':'READY',{color:muted,wrap:'truncate'})):null,
    headerHeight>=3?text((process.env.TIM_ASCII==='1'?'-':'═').repeat(Math.max(1,size.w-2)),{color:'#8EE8AA'}):null),
   hero&&spare?h(Box,{height:Math.min(1,spare),flexShrink:0}):null,
-  hero&&variant==='stacked'?h(Box,{height:heroHeight,flexShrink:0,flexDirection:'column',alignItems:'center'},portrait(heroArt,!animation||reducedMotion()?-1:staticPreview?previewFrame:animationFrame),text(' '),text(mark,{color:'#8EE8AA'}),showHeroCopy?text('\nYOUR WORK. ONE TERMINAL.',{bold:true}):null,showHeroCopy?text('> What are we building?',{color:amber,bold:true}):null):hero?h(Box,{height:heroHeight,flexShrink:0,gap:large?5:4,paddingLeft:heroLeft},h(Box,{paddingTop:portraitPadding,flexShrink:0},portrait(heroArt,!animation||reducedMotion()?-1:staticPreview?previewFrame:animationFrame)),h(Box,{flexDirection:'column',paddingTop:logoTop,minWidth:0,flexShrink:1},text(mark,{color:'#8EE8AA'}),showHeroCopy?text('\n'+(large?tracked('YOUR WORK. ONE TERMINAL.',logoWidth):narrowArt?'YOUR WORK. ONE TERMINAL.':'YOUR WORK. ONE TERMINAL.'),{color:'#C5F7D4',bold:true}):null,showHeroCopy?text((large?tracked('> What are we building?',logoWidth):narrowArt?'> What are we building?':'> What are we building?'),{color:amber,bold:true}):null)):null,
+  hero?h(Box,{height:heroHeight,flexShrink:0},scene(sceneOptions,!animation||reducedMotion()?-1:staticPreview?previewFrame:animationFrame)):null,
   hero&&spare?h(Box,{height:Math.min(1,Math.max(0,spare-1)),flexShrink:0}):null,
   panelHeight>0?h(Box,{height:panelHeight,flexShrink:0,overflow:'hidden',gap:1},
    sidePanels?panel('WORKSPACE',workspace.slice(0,bodyHeight),{width:Math.floor((size.w-3)*0.42),overflow:'hidden'}):panel('SESSION / '+(session?.title||'new session'),[text(visible.join('\n'))],{flexGrow:1,flexBasis:0,overflow:'hidden'}),

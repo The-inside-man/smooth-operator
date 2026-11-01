@@ -1,3 +1,4 @@
+import {retroWordmark} from './retro.mjs';
 import stringWidth from 'string-width';
 const segmenter=new Intl.Segmenter(undefined,{granularity:'grapheme'});
 export const cellWidth=value=>stringWidth(value);
@@ -36,21 +37,6 @@ export function layout(w,h,home,active,inputRows=1){
  }
  return {wide,variant,hero:variant!=='none',large:variant==='large',headerHeight,heroHeight,composerHeight,panelHeight,showHeroCopy,heroSpare:variant!=='none'&&panelHeight===0?Math.max(0,available-heroHeight):0};
 }
-export const smallHood=String.raw`       .:===:.
-     .//#####\.
-    //##:   :##\
-   |##:       :##|
-   |#|         |#|
-    \#:       :#/
-   .:/##:.__.:##\:.
- .//###/\####/\###\.
-:####::..\##/..::####:`;
-export const smallLogo=" ________  ______  __    __\n|__    __||__  __||  \\/  |\n   || ||     ||   ||\\/|| |\n   || ||   __||__ ||   || |\n  _|| ||_ |      |||   || |\n |_______||______||____||_|\n  -------  ------ ---- --\n      _           _ _\n ____| |_ _   _ _| (_) ___\n/ ___| __| | | / _  |/ _ \\\n\\__ \\ |_| |_| |(_| | (_) |\n|___/\\__|\\___/\\____|\\___/\n ---  --   ---  ----  ---";
-
-export const microHood=String.raw`     .:===:.
-   .//:   :\.
-   |#:     :#|
-    \:.   .:/
- .:###/\_ /\###:.`;
-
-export const shortLogo=" ________  ______  __    __\n|__    __||__  __||  \\  /  |\n   |  |    __| |__| |\\/| |\n   |__|   |______||_|  |_|\n          s t u d i o";
+export {smallHood,microHood} from './art.mjs';
+export const smallLogo=retroWordmark({variant:'narrow'});
+export const shortLogo=retroWordmark({variant:'short'});

@@ -5,8 +5,18 @@ import React from 'react';
 import {renderToString} from 'ink';
 import {edit,clean,endpoint,Client,demoState} from '../cli/core.mjs';
 import {App} from '../cli/app.mjs';
-import {retroWordmark} from '../cli/retro.mjs';
-import {hood,compactHood} from '../cli/art.mjs';
+import {retroWordmark,wordmarkRuns} from '../cli/retro.mjs';
+import {hood,portraitForLayout} from '../cli/art.mjs';
+// Snapshot the color artwork even when Node's test runner disables ANSI output.
+// The ASCII fallback is selected explicitly in its own rendering check below.
+process.env.FORCE_COLOR='3';delete process.env.NO_COLOR;
+// Scene texture may show through empty art cells; every foreground glyph must
+// still occupy its original column, including the gaps between the letters.
+const overlayFits=(actual,art)=>actual.length>=art.length&&[...art].every((char,i)=>char===' '||actual[i]===char);
+const containsOverlay=(frame,art)=>{art=art.trimEnd();return frame.split('\n').some(line=>{
+ for(let x=0;x<=line.length-art.length;x++)if(overlayFits(line.slice(x,x+art.length),art))return true;
+ return false;
+});};
 test('multiline editing, navigation, paste and deletion',()=>{
  let s=edit({text:'abc',cursor:1},'',{return:true});assert.deepEqual(s,{text:'a\nbc',cursor:2});
  s=edit(s,'X\nY');assert.equal(s.text,'a\nX\nYbc');
@@ -32,13 +42,14 @@ test('responsive frames fit the viewport and preserve composer',()=>{
  for(const [w,h] of [[160,52],[154,50],[144,50],[110,38],[100,34],[80,24],[44,18]]){const output=clean(renderToString(React.createElement(App,{demo:true,initial:demoState,staticPreview:true,dimensions:{w,h}}),{columns:w}));const lines=output.split('\n');assert.ok(lines.length<=h,`${w}x${h}: ${lines.length}`);assert.ok(lines.every(l=>l.length<=w));if(w<80){assert.match(output.replaceAll('\n',''),/80 columns/);}else{assert.match(output,/COMMAND/);assert.match(output,/Enter send/);}}
 });
 
-test('outlined lettering remains printable ASCII with hollow paired strokes',()=>{
- for(const large of [true,false]){
-  const block=retroWordmark({large}),ascii=retroWordmark({large,ascii:true});
-  assert.match(block,/\|\|/);assert.match(block,/_{3}/);assert.doesNotMatch(block,/[\u2580-\u259f#]/);assert.match(ascii,/^[ -~\n]+$/);
+test('block lettering has a printable ASCII fallback with identical dimensions',()=>{
+ for(const variant of ['large','compact','narrow','short']){
+  const block=retroWordmark({variant,ascii:false}),ascii=retroWordmark({variant,ascii:true});
+  assert.match(block,/█/);assert.match(block,/[─│└]/);assert.match(ascii,/#/);assert.match(ascii,/^[ -~\n]+$/);
   assert.deepEqual(block.split('\n').map(s=>s.length),ascii.split('\n').map(s=>s.length));
   assert.ok(block.split('\n').every(line=>line.length<78));
  }
+ assert.deepEqual(new Set(wordmarkRuns({large:true}).map(run=>run.color)),new Set(['#94CD3D','#4C7E29','#B2EE4F','#6CA332']));
  const previous=process.env.TIM_ASCII;process.env.TIM_ASCII='1';
  try{const frame=clean(renderToString(React.createElement(App,{demo:true,initial:demoState,staticPreview:true,dimensions:{w:160,h:52}}),{columns:160}));assert.match(frame,/^[ -~\n]+$/);assert.match(frame,/COMMAND/);}finally{if(previous===undefined)delete process.env.TIM_ASCII;else process.env.TIM_ASCII=previous;}
 });
@@ -46,7 +57,7 @@ test('outlined lettering remains printable ASCII with hollow paired strokes',()=
 test('reviewed hoodie is fully visible at both minimum hero breakpoints',()=>{
  for(const [w,h,art] of [[154,50,hood],[160,52,hood]]){
   const output=clean(renderToString(React.createElement(App,{demo:true,initial:demoState,staticPreview:true,dimensions:{w,h}}),{columns:w}));
-  for(const line of art.split('\n'))assert.ok(output.includes(line.trimEnd()),'Clipped hoodie row at '+w+'x'+h+': '+line);
+  for(const line of art.split('\n'))assert.ok(containsOverlay(output,line),'Clipped hoodie row at '+w+'x'+h+': '+line);
   assert.ok(output.split('\n').length<=h);assert.ok(output.split('\n').every(line=>line.length<=w));assert.match(output,/COMMAND/);assert.match(output,/WORKSPACE/);assert.match(output,/SESSION/);
  }
 });
@@ -58,10 +69,11 @@ test('hoodie bottom aligns to hero prompt without moving surrounding UI',()=>{
   assert.deepEqual(position('WORKSPACE'),{x:3,y:panelY});assert.deepEqual(position('SESSION'),{x:sessionX,y:panelY});
   assert.deepEqual(position('COMMAND'),{x:3,y:commandY});assert.deepEqual(position('Enter send'),{x:1,y:footerY});
   assert.deepEqual(position('>   W h a t   a r e   w e   b u i l d i n g ?'),{x:promptX,y:promptY});
-  assert.equal(lines.findIndex(line=>line.includes(art.split('\n').at(-1))),promptY);
+  const artRows=art.split('\n'),lastInk=artRows.findLastIndex(line=>line.trim());
+  assert.equal(lines.findIndex(line=>line.includes(artRows[lastInk].trimEnd())),promptY-(artRows.length-1-lastInk));
   assert.equal(lines[promptY-1].indexOf('Y O U R   W O R K .   O N E   T E R M I N A L .'),promptX);
   const large=w>=154,mark=retroWordmark({large}).split('\n'),markTop=large?5:4;
-  mark.forEach((line,i)=>{if(line.trim())assert.equal(lines[markTop+i].indexOf(line),promptX);});
+  mark.forEach((line,i)=>{const ink=line.trimEnd();if(ink)assert.ok(overlayFits(lines[markTop+i].slice(promptX,promptX+ink.length),ink),'lettering shifted at row '+i);});
  }
 });
 
@@ -82,13 +94,13 @@ test('grapheme editing and wrapped cursor use terminal cells',()=>{
 });
 
 
-test('short welcome retains approved complete portrait and outlined wordmark',()=>{
+test('short welcome retains the complete profile and block wordmark',()=>{
  for(const [w,h] of [[100,24],[100,30],[100,38],[120,24],[120,30],[120,37],[120,40],[140,24],[140,30],[140,50],[160,40],[160,52]]){
   const frame=clean(renderToString(React.createElement(App,{demo:true,staticPreview:true,dimensions:{w,h}}),{columns:w}));
-  const large=w>=154&&h>=37;
+  const selectedLayout=layout(w,h,true,false),large=selectedLayout.large;
   assert.doesNotMatch(frame,/Full TIM artwork needs/);
-  for(const line of (large||(w>=125&&h>=40)?hood:compactHood).split('\n'))assert.ok(frame.includes(line.trimEnd()),w+'x'+h+' missing portrait row '+line);
-  for(const line of (layout(w,h,true,false).variant==='narrow'?smallLogo:retroWordmark({large})).split('\n'))if(line.trim())assert.ok(frame.includes(line.trimEnd()),w+'x'+h+' missing wordmark row');
+  for(const line of portraitForLayout(selectedLayout).split('\n'))assert.ok(containsOverlay(frame,line),w+'x'+h+' missing portrait row '+line);
+  for(const line of (layout(w,h,true,false).variant==='narrow'?smallLogo:retroWordmark({large})).split('\n'))if(line.trim())assert.ok(containsOverlay(frame,line),w+'x'+h+' missing wordmark row');
   assert.match(frame,/COMMAND/);assert.ok(frame.split('\n').length<=h);
  }
 });
@@ -98,32 +110,32 @@ test('rendered full hero shimmer changes cloth only and respects disabled animat
  const render=(previewFrame,animation=true)=>clean(renderToString(React.createElement(App,{demo:true,staticPreview:true,dimensions:{w:160,h:52},previewFrame,animation}),{columns:160}));
  const first=render(0),next=render(16);assert.equal(first,next,'color-only animation preserves every rendered cell');assert.equal(render(16,false),first);
  assert.equal(first.replace(/[#=]/g,'X'),next.replace(/[#=]/g,'X'));
- for(const line of shimmerFrame(hood,1).split('\n'))assert.ok(next.includes(line));
+ for(const line of shimmerFrame(hood,1).split('\n'))assert.ok(containsOverlay(next,line));
  assert.equal(first.split('\n').findIndex(l=>l.includes('COMMAND')),next.split('\n').findIndex(l=>l.includes('COMMAND')));
 });
 
 test('compact tall welcome keeps content near header rather than vertically floating',()=>{
  const lines=clean(renderToString(React.createElement(App,{demo:true,staticPreview:true,dimensions:{w:110,h:50}}),{columns:110})).split('\n');
  const logo=retroWordmark({large:false}).split('\n')[0];assert.ok(lines.findIndex(l=>l.includes(logo))<=5);
- const bottom=lines.findIndex(l=>l.includes(compactHood.split('\n').at(-1))),panel=lines.findIndex(l=>l.includes('WORKSPACE'));assert.ok(panel-bottom<=5);
+ const artRows=portraitForLayout(layout(110,50,true,false)).split('\n'),lastInk=artRows.findLastIndex(line=>line.trim());
+ const bottom=lines.findLastIndex(l=>l.includes(artRows[lastInk].trimEnd())),panel=lines.findIndex(l=>l.includes('WORKSPACE'));assert.ok(panel-bottom<=5);
  assert.ok(lines.some(l=>l.includes('YOUR WORK. ONE TERMINAL.')));assert.match(lines.join('\n'),/COMMAND/);
 });
 
 test('80-column welcome matrix always contains complete selected art and input',async()=>{
- const {layout,smallHood,microHood,smallLogo,shortLogo}=await import('../cli/layout.mjs');
+ const {layout,smallLogo,shortLogo}=await import('../cli/layout.mjs');
  for(const w of [80,81,90,99,100,110,120,125,140,153,154,160])for(const h of [16,18,24,30,37,40,50]){
- const l=layout(w,h,true,false),art=l.variant==='micro'?microHood:l.variant==='small'?smallHood:l.large||l.variant==='balanced'?hood:compactHood;
+ const l=layout(w,h,true,false),art=portraitForLayout(l);
  const frame=clean(renderToString(React.createElement(App,{demo:true,staticPreview:true,dimensions:{w,h}}),{columns:w}));
- assert.ok(l.hero,w+'x'+h+' missing art tier');for(const row of art.split('\n'))assert.ok(frame.includes(row.trimEnd()),w+'x'+h+' incomplete hoodie');
+ assert.ok(l.hero,w+'x'+h+' missing art tier');for(const row of art.split('\n'))assert.ok(containsOverlay(frame,row),w+'x'+h+' incomplete hoodie');
  const mark=['narrow','small','micro'].includes(l.variant)?(['small','micro'].includes(l.variant)?shortLogo:smallLogo):retroWordmark({large:l.large});
- for(const row of mark.split('\n'))if(row.trim())assert.ok(frame.includes(row.trimEnd()),w+'x'+h+' incomplete lettering');
+ for(const row of mark.split('\n'))if(row.trim())assert.ok(containsOverlay(frame,row),w+'x'+h+' incomplete lettering');
  assert.match(frame,/COMMAND/);assert.ok(frame.split('\n').length<=h);assert.ok(frame.split('\n').every(row=>cellWidth(row)<=w));
  }
 });
 
-test('compact wordmark has independently spaced glyphs, open M and distinct lowercase dot',()=>{
- const rows=retroWordmark({large:false}).split('\n');assert.equal(rows.length,19);assert.equal(rows[11],'');assert.ok(rows.every(r=>r.length<=48));
- for(const row of rows.slice(0,11)){assert.equal(row.padEnd(48)[15],' ');assert.equal(row.padEnd(48)[27],' ');}
- for(const row of rows.slice(12)){for(const gap of [8,16,25,34,39])assert.equal(row.padEnd(48)[gap],' ');}
- assert.equal(rows[13].slice(35,39),'|__|');assert.match(rows[5],/\\\//);assert.doesNotMatch(rows.join('\n'),/[#█]/);
+test('compact wordmark keeps separate block glyphs and a clear title/subtitle gap',()=>{
+ const rows=retroWordmark({large:false}).split('\n');assert.equal(rows.length,19);assert.equal(rows[11].trim(),'');assert.ok(rows.every(r=>r.length<=48));
+ for(const row of rows.slice(0,11)){assert.equal(row[15],' ');assert.equal(row[31],' ');}
+ assert.equal(rows[0].slice(36,42).trim(),'');assert.match(rows[12],/█/);
 });

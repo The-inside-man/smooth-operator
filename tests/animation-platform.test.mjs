@@ -1,5 +1,7 @@
 import {smallHood,microHood} from '../cli/layout.mjs';
-import test from 'node:test';import assert from 'node:assert/strict';import {shimmerFrame,shimmerRuns,startShimmer,SHIMMER_FRAMES,SHIMMER_INTERVAL} from '../cli/animation.mjs';import {hood,compactHood} from '../cli/art.mjs';import {silentPlan,rollbackPlan} from '../cli/silent-plan.mjs';
+import test from 'node:test';import assert from 'node:assert/strict';import {shimmerFrame,shimmerRuns,startShimmer,SHIMMER_FRAMES,SHIMMER_INTERVAL} from '../cli/animation.mjs';import {hood,compactHood,portraitForLayout} from '../cli/art.mjs';import {layout} from '../cli/layout.mjs';import {silentPlan,rollbackPlan} from '../cli/silent-plan.mjs';
+// Exercise the color portrait rather than the test runner's monochrome fallback.
+process.env.FORCE_COLOR='3';delete process.env.NO_COLOR;
 test('shimmer has invariant cells, face spaces and low-rate deterministic cleaned timer',()=>{
  for(const art of [hood,compactHood,smallHood,microHood])for(let n=0;n<4;n++){
  const frame=shimmerFrame(art,n);assert.equal(frame.length,art.length);assert.deepEqual(frame.split('\n').map(l=>l.length),art.split('\n').map(l=>l.length));
@@ -33,9 +35,9 @@ test('normal mounted TTY welcome emits animated cloth while preserving typed dra
   const {clean}=await import('../cli/core.mjs');
   for(let n=1;n<=5;n++){
    await new Promise(r=>setTimeout(r,2100));
-   const art=stdout.columns>=154?hood:compactHood;
+   const art=portraitForLayout(layout(stdout.columns,stdout.rows,true,false));
    const changed=shimmerFrame(art,n%4).split('\n').find((line,i)=>line!==art.split('\n')[i])||art.split('\n')[1];
-   assert.ok(clean(bytes).includes(changed),'rendered cycle '+n);assert.match(clean(bytes),n===1?/draft stays/:/draft staXys/);
+   assert.ok(clean(bytes).includes(changed.trimEnd()),'rendered cycle '+n);assert.match(clean(bytes),n===1?/draft stays/:/draft staXys/);
    if(n===1){stdin.write('\x1b[D\x1b[DX');await new Promise(r=>setTimeout(r,50));}
    stdout.columns=[80,99,140,160,160][n-1];stdout.rows=stdout.columns===160?52:37;stdout.emit('resize');
   }

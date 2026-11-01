@@ -10,7 +10,17 @@ if(!/\x1b\[38;2;/.test(output))throw new Error('Truecolor ANSI output is missing
 await fs.mkdir('artifacts',{recursive:true});await fs.writeFile('artifacts/tim-terminal-frame.ansi',output);await fs.writeFile('artifacts/tim-terminal-frame.txt',clean(output));
 const escape=s=>s.replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;');
 let foreground='#C5F7D4',background='#080D0B',bold=false,html='',index=0;
-const append=s=>{if(s)html+=`<span style="color:${foreground};background:${background};font-weight:${bold?'bold':'normal'}">${escape(s)}</span>`;};
+// Model the terminal's fixed cell grid. Browser fallback fonts give some
+// quadrant glyphs a different advance width and otherwise distort entire rows.
+const blocks=new Map([...' ▘▝▀▖▌▞▛▗▚▐▜▄▙▟█'].map((char,mask)=>[char,mask]));
+blocks.delete(' ');
+const append=s=>{if(!s)return;let content='';for(const char of s){
+ const mask=blocks.get(char);
+ if(mask===undefined)content+=escape(char);
+ else{const rectangles={15:[[0,0,2,2]],3:[[0,0,2,1]],12:[[0,1,2,1]],5:[[0,0,1,2]],10:[[1,0,1,2]]};
+  const rects=(rectangles[mask]??[0,1,2,3].filter(bit=>mask&(1<<bit)).map(bit=>[bit%2,Math.floor(bit/2),1,1])).map(([x,y,w,h])=>`<rect x="${x}" y="${y}" width="${w}" height="${h}"/>`).join('');
+  content+=`<svg viewBox="0 0 2 2" preserveAspectRatio="none" style="display:inline-block;vertical-align:top;width:1ch;height:21px;fill:currentColor;shape-rendering:crispEdges">${rects}</svg>`;}
+ }html+=`<span style="color:${foreground};background:${background};font-weight:${bold?'bold':'normal'}">${content}</span>`;};
 for(const match of output.matchAll(/\x1b\[([0-9;]*)m/g)){
  append(output.slice(index,match.index));index=match.index+match[0].length;
  const codes=match[1].split(';').map(Number);
