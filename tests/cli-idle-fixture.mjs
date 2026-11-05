@@ -3,6 +3,7 @@
 import {setImmediate as turn, setTimeout as delay} from 'node:timers/promises';
 
 process.env.TERM = 'xterm-256color';
+process.env.COLORTERM = 'truecolor';
 process.env.FORCE_COLOR = '3';
 for (const name of ['CI', 'NO_COLOR', 'TIM_NO_ANIMATION', 'TIM_REDUCED_MOTION']) delete process.env[name];
 Object.defineProperty(process.stdin, 'isTTY', {value: true});

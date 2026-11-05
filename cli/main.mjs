@@ -9,19 +9,25 @@ import {App,help} from './app.mjs';
 import {Client,demoState,clean} from './core.mjs';
 import {closeOwnedTools} from './tool-runner.mjs';
 import {ownBackend} from './backend.mjs';
+import {providerGuide,providerOverview} from './provider-help.mjs';
+import {mouseEnable,mouseDisable} from './mouse.mjs';
+import {tokenSettingsFromOptions,saveTokenSettings} from './token-settings.mjs';
 const args=process.argv.slice(2);
 const usage=`TIM Studio terminal 0.1.0
 Usage: tim REQUEST... (configured model interprets the request)
        tim [--demo | --tools] [--url http://127.0.0.1:PORT]
-           [--data-dir DIRECTORY] [--library DIRECTORY] [--no-color] [--no-animation]
+           [--data-dir DIRECTORY] [--library DIRECTORY] [--no-color] [--no-animation] [--no-mouse]
+           [--max-tokens auto|NUMBER] [--context NUMBER]
        tim voice [--listen] [--overlay] [--devices]
        tim control --task "REQUEST" --target-pid PID --adapter ABSOLUTE_EXECUTABLE
        tim control --capabilities
        tim dependencies list|tor|node|speech|electron
        tim silent (design/preflight only)
        tim --route tor --socks 127.0.0.1:9050 REQUEST...
-       tim models --provider openai|xai
-       tim [--provider local|openai|xai] [--model ID]
+       tim setup (choose and configure a supported local model; no GUI)
+       tim providers [openai|xai|anthropic] [--shell zsh|bash|powershell]
+       tim models --provider openai|xai|anthropic
+       tim [--provider local|openai|xai|anthropic] [--model ID]
        tim install REQUEST [--manager NAME]
        tim listen port 9999 [--protocol tcp|udp] [--mode bind] [--host IP]
        tim toolbox location DIRECTORY
@@ -34,15 +40,27 @@ tim starts or shares an authenticated loopback-only headless backend; no GUI is 
 --url attaches to a server you own without stopping it on exit.
 --demo is sample data only. --tools opens local utilities without a model/backend.
 --provider and --model apply to chat, install/listen/read and toolbox propose.
-Cloud API credentials are read only from backend OPENAI_API_KEY / XAI_API_KEY.
+Cloud API credentials: backend OPENAI_API_KEY / XAI_API_KEY / ANTHROPIC_API_KEY.
+tim providers explains API keys, account billing/credits, model discovery and launch.
 TIM_PROVIDER / TIM_MODEL can select the provider without changing stored settings.
 --library selects an existing model library. No models are downloaded or run on startup.
+--max-tokens auto removes TIM's fixed response-token cap; model/context/provider limits apply.
+--max-tokens NUMBER saves a response budget (1–1048576); --context NUMBER saves local context (512–1048576).
 ${help}
 Enter sends; Ctrl+S also sends; Ctrl+J or Alt+Enter inserts a newline; Esc cancels; Ctrl+Q quits.
-First run: /models, /model N for chat; /agent N configures the main agent.
+Ctrl+P previous page; Ctrl+N next page; Ctrl+L latest output (Control on Mac, not Command).
+Two-finger trackpad / mouse wheel scrolls content when terminal mouse reporting is allowed.
+--no-mouse keeps native terminal selection/scrollback; keyboard scrolling remains available.
+First run: choose an available model when prompted. /models reopens the chooser.
+/model N selects chat; /agent N configures the main agent.
 Package operations always require an exact command review before mutation.`;
 if(args[0]==='--help'||args[0]==='-h'){console.log(usage);process.exit(0);}
 if(args[0]==='--version'||args[0]==='-v'){console.log('TIM Studio 0.1.0');process.exit(0);}
+if(args[0]==='providers'){
+ try{const {options,request}=parseArgs(args);if(options['max-tokens']!==undefined||options.context!==undefined)throw new Error('Use --max-tokens and --context when starting TIM, not with tim providers.');if(request.length>1)throw new Error('Use tim providers [openai|xai|anthropic].');console.log(request[0]?providerGuide(request[0],{shell:options.shell||(process.platform==='win32'?'powershell':process.platform==='darwin'?'zsh':'bash')}):providerOverview());}
+ catch(error){console.error('TIM providers: '+clean(error.message));process.exitCode=1;}
+ process.exit(process.exitCode||0);
+}
 if(args.includes('--no-color'))process.env.FORCE_COLOR='0';
 if(args[0]==='listen'&&args.includes('--show-source')){const fs=await import('node:fs/promises');console.log(await fs.readFile(new URL('./listener.mjs',import.meta.url),'utf8'));process.exit(0);}
 if(args[0]==='control'){try{const {controlCommand}=await import('./control-command.mjs');await controlCommand(args.slice(1));}catch(error){console.error('TIM control: '+clean(error.message));process.exitCode=1;}process.exit(process.exitCode||0);}
@@ -51,23 +69,26 @@ if(args[0]==='voice'){try{const {voiceCommand}=await import('./voice-command.mjs
 if(args[0]==='silent'){try{const {silentCommand}=await import('./silent-plan.mjs');await silentCommand(args.slice(1));}catch(error){console.error(clean(error.message));process.exitCode=1;}process.exit(process.exitCode||0);}
 if(args[0]==='toolbox'){try{const {toolboxCommand}=await import('./toolbox-command.mjs');await toolboxCommand(args.slice(1));}catch(error){console.error('TIM toolbox: '+clean(error.message));process.exitCode=1;}process.exit(process.exitCode||0);}
 const interactive=!!process.stdin.isTTY&&!!process.stdout.isTTY&&process.env.TERM!=='dumb';
-let client,backend,ui,restored=false,closing;
-const restore=()=>{if(restored)return;restored=true;client?.close();if(interactive){process.stdin.setRawMode?.(false);process.stdout.write('\x1b[0m\x1b[?2004l\x1b[?25h\x1b[?1049l');}process.stdin.pause();};
+let client,backend,ui,restored=false,closing,mouseEnabled=false;
+const restore=()=>{if(restored)return;restored=true;client?.close();if(interactive){process.stdin.setRawMode?.(false);process.stdout.write((mouseEnabled?mouseDisable:'')+'\x1b[0m\x1b[?2004l\x1b[?25h\x1b[?1049l');}process.stdin.pause();};
 const close=()=>closing||(closing=(async()=>{await closeOwnedTools();ui?.unmount();if(ui)await ui.waitUntilExit().catch(()=>{});restore();await backend?.close();})());
 try{
- const {options,request,command,natural}=parseArgs(args),install=command==='install',listen=command==='listen',read=command==='read',models=command==='models';
+ const {options,request,command,natural}=parseArgs(args),install=command==='install',listen=command==='listen',read=command==='read',models=command==='models',setup=command==='setup';
+ const tokenSettings=tokenSettingsFromOptions(options);
+ if(Object.keys(tokenSettings).length&&(options.demo||options.tools||models))throw new Error('Use --max-tokens and --context when starting connected TIM, without --demo, --tools, or tim models.');
  if(options.route&&!['direct','tor'].includes(options.route))throw new Error('--route must be direct or tor.');
  if(options.socks){const {torProxy}=await import('./tor.mjs');torProxy(options.socks);}
  const saved=await loadSelection(preferenceRoot(options));
- if(!options.provider&&!process.env.TIM_PROVIDER&&saved.provider)options.provider=saved.provider;
- if(!options.model&&!process.env.TIM_MODEL&&saved.modelId&&saved.provider===(options.provider||process.env.TIM_PROVIDER||'local'))options.model=saved.modelId;
+ if(!setup&&!options.provider&&!process.env.TIM_PROVIDER&&saved.provider)options.provider=saved.provider;
+ if(!setup&&!options.model&&!process.env.TIM_MODEL&&saved.modelId&&saved.provider===(options.provider||process.env.TIM_PROVIDER||'local'))options.model=saved.modelId;
  if((options.demo||options.tools)&&(install||listen||read)||options.demo&&options.tools)throw new Error('Choose one of --demo, --tools or install.');
  if(options.manager&&!install)throw new Error('--manager is only valid with tim install.');
  if((install||listen||read)&&!request.length)throw new Error('Supply a request after tim install or tim listen.');
- const chosen=models?{provider:options.provider||process.env.TIM_PROVIDER}:options.demo||options.tools?{provider:'local'}:selection(options);
+ if(setup&&(request.length||options.demo||options.tools||options.provider&&options.provider!=='local'))throw new Error('Use tim setup to choose a local model, or tim providers for cloud connection instructions.');
+ const chosen=setup?{provider:'local'}:models?{provider:options.provider||process.env.TIM_PROVIDER}:options.demo||options.tools?{provider:'local'}:selection(options);
  if(options.route==='tor'&&(chosen.provider!=='local'||!natural))throw new Error('Tor coverage is limited to built-in image downloads with local model planning. Cloud providers, external tools and package managers are not tunneled; action blocked.');
  if(models){
-  if(!['openai','xai'].includes(chosen.provider))throw new Error('tim models requires --provider openai or xai.');
+  if(!['openai','xai','anthropic'].includes(chosen.provider))throw new Error('tim models requires --provider openai, xai or anthropic. Run tim providers for setup instructions.');
   if(!options.url)backend=await ownBackend({dataDir:options['data-dir'],libraryRoot:options.library&&path.resolve(options.library)});
   client=new Client(options.url||backend.url,undefined,backend?.token);const result=await client.request('provider-models',{provider:chosen.provider});
   console.log(clean(result.models.join('\n'))+'\nIDs are account-visible, not a guarantee of text/strict-schema capability.');
@@ -79,19 +100,23 @@ try{
    if(!options.url)backend=await ownBackend({dataDir:options['data-dir'],libraryRoot:options.library&&path.resolve(options.library)});
    client=new Client(options.url||backend.url,chosen,backend?.token);client.transport={mode:options.route||'direct',proxy:options.socks||'127.0.0.1:9050'};
   }
-  const initial=client?await client.request('state'):structuredClone(demoState);
-  if(client&&!options.demo&&!options.tools){if(chosen.provider==='local'&&!chosen.modelId)chosen.modelId=initial.loadedModelId||initial.config?.mainAgentModelId||'';await saveSelection(preferenceRoot(options),chosen);}
+  let initial=client?await client.request('state'):structuredClone(demoState);
+  if(client&&Object.keys(tokenSettings).length)initial=await saveTokenSettings(client,tokenSettings,initial);
+  if(client&&!options.demo&&!options.tools){if(chosen.provider==='local'&&!chosen.modelId)chosen.modelId=initial.loadedModelId||initial.config?.mainAgentModelId||'';if(!setup)await saveSelection(preferenceRoot(options),chosen);}
   if(client){const session=backend?.session||await client.request('sessions',{});initial.sessions=[session,...initial.sessions.filter(s=>s.id!==session.id)];}
   if(!interactive){console.log('TIM Studio / SAMPLE DATA');console.log('Interactive terminal required for composing.');}
   else{
-   process.stdout.write('\x1b[?1049h\x1b[?2004h\x1b[2J\x1b[H');process.once('exit',restore);
+   mouseEnabled=!options['no-mouse'];process.once('exit',restore);
+   process.stdout.write('\x1b[?1049h\x1b[?2004h'+(mouseEnabled?mouseEnable:'')+'\x1b[2J\x1b[H');
    const signal=()=>{void close().catch(e=>{process.stderr.write(clean(e.message)+'\n');process.exitCode=1;});};
-   process.once('SIGINT',signal);process.once('SIGTERM',signal);
+   // Keep handlers registered through async cleanup. Ink's signal-exit would
+   // otherwise re-raise a signal after a once-handler removes itself.
+   process.on('SIGINT',signal);process.on('SIGTERM',signal);
    let component;
    if(read){const {CaptureScreen}=await import('./capture-screen.mjs');component=React.createElement(CaptureScreen,{client,file:request[0],request:request.slice(1).join(' '),options,onQuit:signal});}
    else if(listen){const {ListenScreen}=await import('./listen-screen.mjs');component=React.createElement(ListenScreen,{client,request:request.join(' '),options,onQuit:signal});}
    else if(install){const {InstallScreen}=await import('./install-screen.mjs');component=React.createElement(InstallScreen,{client,request:request.join(' '),manager:options.manager,onQuit:signal});}
-   else component=React.createElement(App,{client,demo:!!options.demo,initial,startTools:!!options.tools,onQuit:signal,initialRequest:natural?request.join(' '):'',animation:!options['no-animation'],onSelection:s=>saveSelection(preferenceRoot(options),s)});
+   else component=React.createElement(App,{client,demo:!!options.demo,initial,startTools:!!options.tools,startSetup:setup,onQuit:signal,initialRequest:natural?request.join(' '):'',animation:!options['no-animation'],onSelection:s=>saveSelection(preferenceRoot(options),s)});
    ui=render(React.createElement(TerminalBoundary,null,component),{exitOnCtrlC:false,maxFps:20,patchConsole:true});await ui.waitUntilExit();
    process.off('SIGINT',signal);process.off('SIGTERM',signal);
   }

@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { Store } from './store.mjs';
 
 export const PIPELINE_NODE_TYPES = ['input', 'agent', 'chat', 'code', 'image', 'video', 'upscale', 'transcribe', 'load', 'unload'];
-export const PIPELINE_LIMITS = Object.freeze({ nodes: 32, input: 12000, prompt: 12000, result: 64000, context: 32000, expandedPrompt: 64000 });
+export const PIPELINE_LIMITS = Object.freeze({ nodes: 32, input: 12000, prompt: 12000, result: 16 * 1024 * 1024, context: 32000, expandedPrompt: 64000 });
 const terminal = new Set(['completed', 'failed', 'cancelled']);
 const modelTypes = new Set(['chat', 'code', 'image', 'video', 'upscale', 'transcribe', 'load']);
 const identifier = /^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/;
@@ -16,7 +16,7 @@ const frozen = value => { if (value && typeof value === 'object' && !Object.isFr
 
 const settingRanges = {
   width: [64, 2048, true], height: [64, 2048, true], steps: [1, 100, true], cfg: [0, 30], frames: [5, 121, true], seed: [-1, 2147483647, true],
-  temperature: [0, 2], maxTokens: [1, 8192, true], context: [512, 32768, true], agentMaxSteps: [1, 8, true], agentTimeoutSeconds: [1, 1800]
+  temperature: [0, 2], maxTokens: [0, 1048576, true], context: [512, 1048576, true], agentMaxSteps: [1, 8, true], agentTimeoutSeconds: [1, 1800]
 };
 function settingsValue(value = {}) {
   only(value, [...Object.keys(settingRanges), 'negativePrompt'], 'Step settings');
@@ -29,7 +29,6 @@ function settingsValue(value = {}) {
     if (key === 'frames' && (item - 1) % 4) throw new Error('Video frames must be 4n + 1.');
     result[key] = item;
   }
-  if (result.context && result.maxTokens && result.maxTokens >= result.context) throw new Error('Response tokens must be smaller than the context window.');
   return result;
 }
 

@@ -6,7 +6,7 @@ import {fileURLToPath} from 'node:url';
 import {demoState} from '../cli/core.mjs';
 
 test('synthetic terminal through HTTP adapter: rejected send, retry, streamed rendering and cancellation',async()=>{
- const state=structuredClone(demoState);state.sessions[0].messages=[];
+ const state=structuredClone(demoState);state.sessions[0].messages=[];state.models=[{id:'fixture-agent',name:'Fixture agent',kind:'chat',available:true}];state.config.mainAgentModelId='fixture-agent';
  let stream,child,output='',errors='',stage=0,posts=0,cancelled=false;
  const calls=[];
  const publish=()=>stream?.write(`data: ${JSON.stringify(state)}\n\n`);
@@ -41,12 +41,12 @@ test('synthetic terminal through HTTP adapter: rejected send, retry, streamed re
    else if(stage===5&&output.includes('CANCELLED_CONFIRMED')){stage=6;child.stdin.write('\x11');}
   });
   const code=await new Promise(r=>child.on('close',r));assert.equal(code,0,errors);assert.equal(stage,6,output.slice(-3000));assert.equal(posts,2);assert.ok(cancelled);
-  assert.equal(calls[0].body.prompt,'hello adapter');assert.equal(calls[1].body.prompt,'hello adapter');assert.equal(calls[1].body.kind,'agent');assert.equal(calls[2].body.id,'test-job');assert.ok(calls.every(c=>c.header==='1'));assert.ok(output.includes('\x1b[?1049l'));
+  assert.equal(calls[0].body.prompt,'hello adapter');assert.equal(calls[1].body.prompt,'hello adapter');assert.equal(calls[1].body.kind,'chat');assert.equal(calls[2].body.id,'test-job');assert.ok(calls.every(c=>c.header==='1'));assert.ok(output.includes('\x1b[?1049l'));
  }finally{clearTimeout(timeout);child?.kill();stream?.end();server.closeAllConnections();await new Promise(r=>server.close(r));}
 });
 
 test('real Ink key sequences: BS/DEL/Delete, graphemes, bracketed paste, Enter and resize preserve request',async()=>{
- const state=structuredClone(demoState);let stream,child,output='',received;
+ const state=structuredClone(demoState);state.models=[{id:'fixture-agent',name:'Fixture agent',kind:'chat',available:true}];state.config.mainAgentModelId='fixture-agent';let stream,child,output='',received;
  const server=http.createServer(async(req,res)=>{if(req.url==='/api/events'){stream=res;res.writeHead(200,{'content-type':'text/event-stream'});res.write('data: '+JSON.stringify(state)+'\n\n');return;}res.setHeader('content-type','application/json');if(req.url==='/api/sessions'){res.end(JSON.stringify(state.sessions[0]));return;}if(req.url==='/api/state'){res.end(JSON.stringify(state));return;}let raw='';for await(const c of req)raw+=c;if(req.url==='/api/jobs'){received=JSON.parse(raw);res.end(JSON.stringify({id:'edit-job',sessionId:'demo'}));return;}res.end('{}');});await new Promise(r=>server.listen(0,'127.0.0.1',r));
  const delay=ms=>new Promise(r=>setTimeout(r,ms));
  try{child=spawn(process.execPath,[fileURLToPath(new URL('./tty-fixture.mjs',import.meta.url))],{stdio:['pipe','pipe','pipe'],env:{...process.env,TIM_TEST_URL:`http://127.0.0.1:${server.address().port}`}});child.stdout.on('data',c=>output+=c);let errors='';child.stderr.on('data',c=>errors+=c);

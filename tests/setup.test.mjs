@@ -56,6 +56,26 @@ async function fixture(t, { budgetBytes = 8 * GiB } = {}) {
   return { studio, dir, installed, downloads, calls };
 }
 
+test('response settings default to Auto, persist larger budgets, and retain validation and busy guards',async t=>{
+ const {studio}=await fixture(t);assert.equal(studio.config.maxTokens,0);
+ await studio.updateSettings({maxTokens:32768,context:131072});
+ assert.equal((await studio.store.read('settings',{})).maxTokens,32768);assert.equal(studio.config.context,131072);
+ // Cloud budgets are independent of the local context. Local engines validate
+ // the actual prompt and loaded window when they receive a request.
+ await studio.updateSettings({maxTokens:65536,context:4096});assert.equal(studio.config.maxTokens,65536);
+ await studio.updateSettings({maxTokens:0});assert.equal((await studio.store.read('settings',{})).maxTokens,0);
+ for(const settings of [{maxTokens:-1},{maxTokens:1048577},{maxTokens:1.5},{context:511},{context:1048577}])await assert.rejects(studio.updateSettings(settings),/between/);
+ studio.active={job:{id:'fixture'},controller:new AbortController()};
+ await assert.rejects(studio.updateSettings({maxTokens:0}),/Finish or cancel/);studio.active=null;
+});
+
+test('changing only the response budget keeps loaded models available',async t=>{
+ const {studio,calls}=await fixture(t);studio.llama.modelId='fixture-loaded';
+ await studio.updateSettings({maxTokens:32768});assert.equal(studio.llama.modelId,'fixture-loaded');assert.deepEqual(calls,[]);
+ await studio.updateSettings({maxTokens:0});assert.equal(studio.llama.modelId,'fixture-loaded');assert.deepEqual(calls,[]);
+ await studio.updateSettings({context:32768});assert.equal(studio.llama.modelId,null);assert.ok(calls.includes('specialist-unloaded'));
+});
+
 test('downloaded default becomes the configured guide and catalog distinguishes files from runtime readiness', async t => {
   const { studio, installed, downloads } = await fixture(t);
   assert.equal(studio.guideSnapshot().status, 'not-installed');
@@ -84,6 +104,132 @@ test('installing the default guide preserves an existing explicit main model cho
   assert.equal(studio.guideSnapshot().modelId, 'chosen-main');
 });
 
+test('explicit engine repair prepares an installed selected model without downloading a replacement', async t => {
+  const { studio, calls } = await fixture(t);
+  studio.config.mainAgentModelId='selected-local';
+  studio.registry={models:[{id:'selected-local',name:'Selected local',kind:'chat',available:false,issue:'Chat engine required'}],runtimes:{}};
+  studio.rescan=async()=>{studio.registry.models[0].available=true;studio.registry.models[0].issue='';};
+  await studio.setupGuide({installRuntime:true});await studio.setupPromise;
+  assert.equal(studio.config.mainAgentModelId,'selected-local');
+  assert.equal(studio.orchestrator.modelId,'selected-local');
+  assert.equal(studio.guideSnapshot().error,undefined);
+  assert.equal(calls.filter(call=>call.id==='selected-local').length,1);
+});
+
+test('a successful setup retry clears a previous model-load failure and can run in the background', async t => {
+  const { studio, installed } = await fixture(t);
+  installed.push(guide());studio.registry.runtimes.chat={backend:'cpu'};await studio.refreshDownloadedModels();
+  studio.runtimeSetup={status:'error',error:'Prior load failure'};studio.guideState={status:'error',error:'Prior load failure'};
+  const finish=deferred();let started=false;
+  studio.orchestrator.load=async model=>{started=true;await finish.promise;studio.orchestrator.modelId=model.id;};
+  await studio.setupGuide({background:true});
+  try{
+    assert.equal(studio.runtimeSetup.status,'ready');
+    assert.equal(studio.runtimeSetup.error,undefined);
+    assert.ok(studio.setupPromise,'setup route returns while the model loads');
+  }finally{finish.resolve();await studio.setupPromise;}
+  assert.equal(started,true);assert.equal(studio.guideSnapshot().status,'running');
+});
+
+test('catalog setup downloads and loads the exact larger selection before saving it as the main model', async t => {
+  const {studio,installed,downloads,calls}=await fixture(t),requested=[];
+  installed.push(guide());studio.registry.runtimes.chat={backend:'cpu'};await studio.refreshDownloadedModels();
+  const previousId=studio.config.mainAgentModelId,target=catalogModels.find(model=>model.id==='qwen3-4b');
+  studio.downloads.start=async id=>{
+    requested.push(id);assert.equal(studio.config.mainAgentModelId,previousId,'download must preserve the previous choice');
+    installed.push({id:'catalog:'+id,catalogId:id,name:target.name,kind:'chat',available:true,file:'/fixture/model.gguf'});
+    downloads.push({catalogId:id,status:'completed'});
+  };
+  studio.orchestrator.load=async function(model){
+    assert.equal(studio.config.mainAgentModelId,previousId,'model must start before the saved choice changes');
+    calls.push({id:model.id});this.modelId=model.id;
+  };
+  await studio.setupGuide({catalogId:target.id});await studio.setupPromise;
+  assert.deepEqual(requested,[target.id]);assert.equal(studio.orchestrator.modelId,'catalog:'+target.id);
+  assert.equal(studio.config.mainAgentModelId,'catalog:'+target.id);
+  assert.equal((await studio.store.read('settings',{})).mainAgentModelId,'catalog:'+target.id);
+  assert.deepEqual(studio.localSetup,{catalogId:target.id,status:'ready',explicit:true});
+});
+
+test('failed catalog download or model load keeps the previous saved selection without a starter fallback', async t => {
+  for(const stage of ['download','load']){
+    const {studio,installed,downloads}=await fixture(t),requested=[];
+    installed.push(guide());studio.registry.runtimes.chat={backend:'cpu'};await studio.refreshDownloadedModels();
+    const previousId=studio.config.mainAgentModelId;
+    studio.downloads.start=async id=>{
+      requested.push(id);if(stage==='download')throw new Error('Fixture download failure');
+      installed.push({id:'catalog:'+id,catalogId:id,name:'Selected 4B',kind:'chat',available:true,file:'/fixture/model.gguf'});
+      downloads.push({catalogId:id,status:'completed'});
+    };
+    if(stage==='load')studio.orchestrator.load=async()=>{throw new Error('Fixture load failure');};
+    await studio.setupGuide({catalogId:'qwen3-4b'});await studio.setupPromise;
+    assert.deepEqual(requested,['qwen3-4b']);assert.equal(studio.config.mainAgentModelId,previousId);
+    assert.equal((await studio.store.read('settings',{})).mainAgentModelId,previousId);
+    assert.equal(studio.localSetup.catalogId,'qwen3-4b');assert.equal(studio.localSetup.status,'error');
+    assert.match(studio.localSetup.error,/Fixture .* failure/);
+  }
+});
+
+test('downloaded Chat and Code selections load the chosen model without replacing the saved Agent', async t => {
+  for(const mode of ['chat','code']){
+    const {studio,installed,downloads}=await fixture(t),requested=[];
+    installed.push(guide());studio.registry.runtimes.chat={backend:'cpu'};await studio.refreshDownloadedModels();
+    const previousId=studio.config.mainAgentModelId;studio.orchestrator.modelId=previousId;
+    studio.downloads.start=async id=>{
+      requested.push(id);installed.push({id:'catalog:'+id,catalogId:id,name:'Chosen 4B',kind:'chat',available:true,file:'/fixture/model.gguf'});
+      downloads.push({catalogId:id,status:'completed'});
+    };
+    await studio.setupGuide({catalogId:'qwen3-4b',mode});await studio.setupPromise;
+    assert.deepEqual(requested,['qwen3-4b']);assert.equal(studio.config.mainAgentModelId,previousId);
+    assert.equal((await studio.store.read('settings',{})).mainAgentModelId,previousId);
+    assert.equal(studio.orchestrator.modelId,previousId);assert.equal(studio.llama.modelId,'catalog:qwen3-4b');
+    assert.deepEqual(studio.localSetup,{catalogId:'qwen3-4b',mode,status:'ready',explicit:true});
+  }
+});
+
+test('catalog setup modes are validated and the same model cannot switch roles during setup', async t => {
+  const {studio,installed,downloads}=await fixture(t),started=deferred(),finish=deferred();
+  await assert.rejects(studio.setupGuide({catalogId:'qwen3-4b',mode:'other'}),/supported setup mode/);
+  await assert.rejects(studio.setupGuide({mode:'chat'}),/supported setup mode/);
+  studio.downloads.start=async id=>{
+    started.resolve();await finish.promise;
+    installed.push({id:'catalog:'+id,catalogId:id,name:'Chosen 4B',kind:'chat',available:true,file:'/fixture/model.gguf'});downloads.push({catalogId:id,status:'completed'});
+  };
+  await studio.setupGuide({catalogId:'qwen3-4b',mode:'chat'});await started.promise;
+  try{await assert.rejects(studio.setupGuide({catalogId:'qwen3-4b',mode:'agent'}),/current local model setup/);}
+  finally{finish.resolve();await studio.setupPromise;}
+});
+
+test('a failed explicit starter load does not auto-select its files during rescan', async t => {
+  const {studio,installed,downloads}=await fixture(t);
+  studio.registry.runtimes.chat={backend:'cpu'};
+  studio.downloads.start=async id=>{installed.push(guide());downloads.push({catalogId:id,status:'completed'});};
+  studio.orchestrator.load=async()=>{throw new Error('Fixture model load failed');};
+  await studio.setupGuide({catalogId:defaultOrchestratorId});await studio.setupPromise;await studio.refreshDownloadedModels();
+  assert.equal(studio.config.mainAgentModelId,'');assert.equal((await studio.store.read('settings',{})).mainAgentModelId,undefined);
+  assert.equal(studio.localSetup.status,'error');
+});
+
+test('catalog setup rejects unsupported entries and concurrent changes before starting another download', async t => {
+  const {studio,installed,downloads}=await fixture(t),started=deferred(),finish=deferred(),requested=[];
+  for(const catalogId of ['../outside','whisper-tiny','not-a-model',42])await assert.rejects(studio.setupGuide({catalogId}),/supported chat model/);
+  studio.downloads.start=async id=>{
+    requested.push(id);started.resolve();await finish.promise;
+    installed.push({id:'catalog:'+id,catalogId:id,name:'Chosen 4B',kind:'chat',available:true,file:'/fixture/model.gguf'});
+    downloads.push({catalogId:id,status:'completed'});
+  };
+  await studio.setupGuide({catalogId:'qwen3-4b'});await started.promise;
+  try{
+    await studio.setupGuide({catalogId:'qwen3-4b'});
+    await assert.rejects(studio.setupGuide({catalogId:'qwen3-8b'}),/current local model setup/);
+    await assert.rejects(studio.updateSettings({mainAgentModelId:''}),/local model setup/);
+    await assert.rejects(studio.enqueue({kind:'chat',prompt:'wait'}),/local model setup/);
+    await assert.rejects(studio.runPipeline({pipelineId:'not-started'}),/local model setup/);
+    await assert.rejects(studio.resumePipeline('not-resumed'),/local model setup/);
+    assert.deepEqual(requested,['qwen3-4b']);
+  }finally{finish.resolve();await studio.setupPromise;}
+});
+
 test('warming the guide uses bounded CPU settings and specialists can load and unload beside it', async t => {
   const { studio, installed, calls } = await fixture(t);
   installed.push(guide()); studio.registry.runtimes.chat = { backend: 'metal' };
@@ -97,6 +243,14 @@ test('warming the guide uses bounded CPU settings and specialists can load and u
   await studio.unloadModel('coder');
   assert.equal(studio.llama.modelId, null); assert.equal(studio.orchestrator.modelId, guide().id);
   await assert.rejects(studio.unloadModel(guide().id), /guide stays loaded/);
+});
+
+test('guide loads honor the configured context and a pipeline context override',async t=>{
+ const {studio,installed,calls}=await fixture(t);
+ installed.push(guide());studio.registry.runtimes.chat={backend:'cpu'};await studio.refreshDownloadedModels();
+ studio.config.context=32768;await studio.warmGuide();assert.equal(calls.filter(call=>call.id).at(-1).context,32768);
+ await studio.loadOrchestrator(guide(),studio.lifecycle.signal,()=>{},65536);assert.equal(calls.filter(call=>call.id).at(-1).context,65536);
+ assert.equal(studio.orchestrator.fixedContext,false);assert.equal(studio.config.context,32768);
 });
 
 test('cancelling a request waiting for background guide warmup releases the wait promptly', async t => {
@@ -162,6 +316,26 @@ test('closing waits for a cancelled manual model load to finish its cleanup', as
   const observed = loading.then(() => ({ completed: true }), error => ({ error }));
   await waitForStart(started, loading); await studio.close();
   assert.ok((await observed).error); assert.equal(studio.loadingModel, false); assert.equal(studio.manualLoadPromise, null);
+});
+
+test('setup catalog API returns all supported choices with fresh hardware memory and forwards an exact selection', async t => {
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'tim-setup-options-'));
+  t.mock.method(Studio.prototype,'rescan',async function(){});
+  const service=await startServer({port:0,dataDir:dir,autoSetup:false,telemetry:false});
+  t.after(async()=>{await service.close();await fs.rm(dir,{recursive:true,force:true});});
+  const memory={total:32*GiB,totalBytes:32*GiB,availableBytes:20*GiB,reserveBytes:3*GiB,modelBudgetBytes:17*GiB,sampledAt:Date.now(),stale:false,status:'ok',availableSource:'os'};
+  let sampled=0,captured;
+  t.mock.method(service.studio,'sampleMemory',async()=>{
+    sampled++;service.studio.memoryMonitor.snapshot=()=>({memory,loadedModels:[]});
+  });
+  const response=await fetch(service.url+'/api/setup/options'),snapshot=await response.json();
+  assert.equal(response.status,200);assert.equal(sampled,1);assert.deepEqual(snapshot.memory,memory);
+  assert.deepEqual(snapshot.catalog.filter(model=>model.kind==='chat').map(model=>model.id),catalogModels.filter(model=>model.kind==='chat').map(model=>model.id));
+  assert.ok(snapshot.hardware.logicalCores>0);assert.equal(typeof snapshot.hardware.cpuName,'string');
+  assert.ok(snapshot.catalog.every(model=>!Object.hasOwn(model,'files')));assert.deepEqual(snapshot.downloads,[]);
+  t.mock.method(service.studio,'setupGuide',async options=>{captured=options;});
+  const chosen=await fetch(service.url+'/api/setup',{method:'POST',headers:{'x-tim-request':'1','content-type':'application/json'},body:JSON.stringify({catalogId:'qwen3-4b',installRuntime:true})});
+  assert.equal(chosen.status,200);assert.deepEqual(captured,{catalogId:'qwen3-4b',installRuntime:true,background:true});
 });
 
 test('model API rejects unknown catalog IDs, uninstalled loads and cross-origin model mutations', async t => {

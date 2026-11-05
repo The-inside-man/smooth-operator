@@ -51,6 +51,7 @@ export async function startServer({ port = 4317, dataDir = process.env.TIM_DATA_
     try {
       if (management && await management(req,res,studio)) return;
       if (url.pathname === '/api/provider-models' && req.method === 'POST') return json(res, {models:await listCloudModels((await body(req)).provider)});
+      if (url.pathname === '/api/setup/options' && req.method === 'GET') { await studio.sampleMemory(); return json(res, studio.snapshot()); }
       if (url.pathname === '/api/timing/reset' && req.method === 'POST') { await studio.resetTimings(); return json(res,{ok:true}); }
       if (url.pathname === '/api/state') return json(res, studio.snapshot());
       if (url.pathname === '/api/events' && req.method === 'GET') {
@@ -64,7 +65,7 @@ export async function startServer({ port = 4317, dataDir = process.env.TIM_DATA_
       if (url.pathname === '/api/cancel' && req.method === 'POST') { await studio.cancel((await body(req)).id); return json(res, { ok: true }); }
       if (url.pathname === '/api/settings' && req.method === 'POST') { await studio.updateSettings(await body(req)); return json(res, { ok: true }); }
       if (url.pathname === '/api/rescan' && req.method === 'POST') { await studio.rescan(); return json(res, { ok: true }); }
-      if (url.pathname === '/api/setup' && req.method === 'POST') { await studio.setupGuide(); return json(res, { ok: true }); }
+      if (url.pathname === '/api/setup' && req.method === 'POST') { const options=await body(req); await studio.setupGuide({installRuntime:options.installRuntime===true,background:true,...(options.catalogId===undefined?{}:{catalogId:options.catalogId}),...(options.mode===undefined?{}:{mode:options.mode})}); return json(res, { ok: true }); }
       if (url.pathname === '/api/models/download' && req.method === 'POST') return json(res, await studio.downloads.start((await body(req)).id));
       if (url.pathname === '/api/models/cancel' && req.method === 'POST') return json(res, await studio.downloads.cancel((await body(req)).id));
       if (url.pathname === '/api/models/load' && req.method === 'POST') { await studio.loadModel((await body(req)).id); return json(res, { ok: true }); }

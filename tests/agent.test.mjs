@@ -57,6 +57,31 @@ async function settled(studio, job) {
   return studio.sessions.find(s => s.id === job.sessionId).messages.find(m => m.jobId === job.id);
 }
 
+for(const budget of [0,16384])test(`agent honors response budget ${budget===0?'Auto':budget} without a hidden 1024-token cap`,async t=>{
+ const {studio}=await fixture(t);studio.config.maxTokens=budget;let received;
+ studio.llama.turn=async(_messages,settings)=>{received=settings.maxTokens;return {content:'Complete long answer. '.repeat(1500)};};
+ const job=await studio.enqueue({kind:'agent',prompt:'Explain everything in detail'}),message=await settled(studio,job);
+ assert.equal(job.status,'completed');assert.equal(received,budget);assert.equal(message.content,'Complete long answer. '.repeat(1500));
+});
+
+test('agent preserves a partial plain answer when the engine reports a cutoff',async t=>{
+ const {studio}=await fixture(t);
+ studio.llama.turn=async()=>{const error=new Error('Context limit reached');error.partialText='The useful first section';throw error;};
+ const job=await studio.enqueue({kind:'agent',prompt:'Explain the complete task'}),message=await settled(studio,job);
+ assert.equal(job.status,'failed');assert.equal(message.content,'The useful first section');assert.match(message.error,/Context limit/);
+});
+
+test('long specialist results reach the agent without the previous 12000-character cut',async t=>{
+ const {studio}=await fixture(t);const result='Complete code section. '.repeat(1500);let turn=0;
+ studio.llama.generate=async(_messages,_settings,_signal,onToken)=>{onToken(result);};
+ studio.llama.turn=async messages=>{
+  if(++turn===1)return invoking(call('run_chat',{modelId:'coder',prompt:'Write the full code'}));
+  assert.equal(JSON.parse(messages.at(-1).content).text,result);return {content:result};
+ };
+ const job=await studio.enqueue({kind:'agent',prompt:'Write a complete code example'}),message=await settled(studio,job);
+ assert.equal(job.status,'completed');assert.equal(message.content,result);
+});
+
 test('main agent runs a specialist inline, reloads, synthesizes real results and persists child tracking', async t => {
   const { studio, turns, loads, media } = await fixture(t);
   studio.llama.turn = async messages => { turns.push(structuredClone(messages)); return turns.length === 1 ? invoking(call()) : { content: 'The specialist created an artifact; I have not inspected it.' }; };

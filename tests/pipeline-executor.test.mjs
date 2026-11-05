@@ -146,6 +146,14 @@ test('retaining a prepared specialist for the guide does not bypass combined mem
   assert.equal(events.filter(event => event === 'specialist:load:coder').length, 1); assert.equal(studio.orchestrator.modelId, 'main');
 });
 
+test('pipeline agent passes its response budget and context to the resident guide without changing global settings',async t=>{
+ const {studio,execute,context}=await fixture(t);let loaded,generated;
+ studio.loadOrchestrator=async(_model,_signal,_update,window)=>{loaded=window;};
+ studio.orchestrator.turn=async(_messages,settings)=>{generated=settings;return {content:'Complete long response. '.repeat(5000)};};
+ const result=await execute({type:'agent',prompt:'Explain the complete task',settings:{maxTokens:0,context:65536}},context);
+ assert.equal(loaded,65536);assert.equal(generated.maxTokens,0);assert.equal(result.text,'Complete long response. '.repeat(5000));assert.equal(studio.config.context,4096);
+});
+
 test('custom agents run in a separate tool-capable process and preserve the resident guide', async t => {
   const { studio, execute, context, requests, events } = await fixture(t);
   const result = await execute({ type: 'agent', modelId: 'custom', prompt: 'Plan the task', settings: { context: 2048, maxTokens: 256 }, memoryPolicy: 'keep' }, context);

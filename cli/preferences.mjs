@@ -1,4 +1,4 @@
 import fs from 'node:fs/promises';import path from 'node:path';import os from 'node:os';
 export const preferenceRoot=options=>path.resolve(options['data-dir']||process.env.TIM_DATA_DIR||path.join(os.homedir(),'.tim-studio'));
-export async function loadSelection(root){try{const s=JSON.parse(await fs.readFile(path.join(root,'cli-selection.json'),'utf8'));if(!['local','openai','xai'].includes(s.provider)||typeof s.modelId!=='string'||s.modelId.length>160)return {};return s;}catch{return {};}}
+export async function loadSelection(root){try{const s=JSON.parse(await fs.readFile(path.join(root,'cli-selection.json'),'utf8'));if(!['local','openai','xai','anthropic'].includes(s.provider)||typeof s.modelId!=='string'||s.modelId.length>160)return {};return s;}catch{return {};}}
 export async function saveSelection(root,selection){await fs.mkdir(root,{recursive:true});const file=path.join(root,'cli-selection.json'),temp=file+'.'+crypto.randomUUID();try{await fs.writeFile(temp,JSON.stringify({provider:selection.provider,modelId:selection.modelId||''})+'\n',{mode:0o600});await fs.rename(temp,file);}finally{await fs.unlink(temp).catch(()=>{});}}

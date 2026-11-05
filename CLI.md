@@ -18,13 +18,46 @@ tim --help
 tim --version
 tim --demo
 tim --tools
+tim setup
+tim providers
 tim --data-dir DIRECTORY --library MODEL_LIBRARY_DIRECTORY
 tim --url http://127.0.0.1:PORT
 ```
 
-Normal startup owns an ephemeral loopback-only backend and closes it on exit. `--url` attaches to an existing backend without stopping it. Concurrent owned instances cannot share a data directory. After a crash, inspect a stale `cli.lock` before manually removing it. Models are not downloaded or run on startup. Missing models produce setup guidance; `--demo` is sample data. Noninteractive use prints guidance and never silently approves an action.
+Normal startup owns an ephemeral loopback-only backend and closes it on exit. `--url` attaches to an existing backend without stopping it. After a crash, inspect a stale `cli.lock` before manually removing it. Models are not downloaded or run on startup. If no usable model is selected, TIM opens the model chooser. `/models` reopens this same chooser: installed chat models appear first, followed by supported catalog models available to download. Rows identify the current model, installed models and downloads; download size, memory estimates and suggestions help you choose. Use Up/Down or a model number, then Enter. An installed available model is selected immediately; a downloadable model opens its setup review, and a second Enter confirms the download. Esc returns to your draft. Your request stays ready for a separate Enter to send after model selection or setup. Press **S** to browse local setup or **P** for cloud connection instructions; Ctrl+R refreshes the catalog and memory reading. `--demo` is sample data. Noninteractive use prints guidance and never silently approves an action.
 
-Enter sends (Ctrl+S is an alias); Ctrl+J inserts a newline; Esc cancels; Ctrl+Q quits. `/help`, `/models`, `/model N`, `/agent N`, `/sessions` and `/tools` expose controls. `NO_COLOR=1` disables color; `TIM_ASCII=1` selects ASCII borders. The enlarged hero subtitle uses bold, tracked terminal cells, not independent font scaling.
+`/model N` and `/agent N` use the same numbered rows shown by `/models`, including installed imports and downloadable catalog models. An available installed row selects immediately. A downloadable row opens review for that exact model before confirmation. `/model N` selects Chat and keeps your main agent; `/agent N` changes the main agent. Choosing a model directly in `/models` keeps your current Agent, Chat or Code mode, including when a download is needed. Chat and Code downloads keep the existing main agent too; standalone `tim setup` and `/setup` prepare an Agent model.
+
+### Set up a local model without the desktop app
+
+Choose a downloadable row in `/models` to go straight to its setup review. You can also run `tim setup`, enter `/setup` in TIM, or press **S** in the model chooser to browse the supported local catalog in a dedicated setup screen. Both paths include larger Qwen3 and Qwen2.5 Coder options. Use Up/Down or a model number to choose, then Enter to review that model's download size, memory estimate and destination. Press Enter again to confirm the download and chat-engine setup. Browsing the list and opening review do not start a download.
+
+Several entries are marked **[SUGGESTED]** in cyan from a fresh system-memory reading and TIM's model-memory estimates. Text also identifies each suggestion, and amber warnings explain a tighter fit. These are planning estimates, not guarantees of speed, output quality, native tool support or a successful load; other applications and context settings affect memory use. The full supported catalog stays available to inspect. Press Ctrl+R after closing other apps to refresh the memory reading and suggestions.
+
+Your choice determines which model is downloaded and selected; setup does not fall back to Qwen3 0.6B if a larger model fails. The small Qwen3 0.6B option is still available (about 397 MB) when you want a compact download. A compatible chat engine is installed when needed (about 12–25 MB). Setup verifies files and shows download, verification and loading progress or an error. Internet access is needed for downloads; chat runs locally afterward. `--data-dir DIRECTORY` chooses where TIM saves the files.
+
+An installed selected model can be reused, including repair of a missing chat engine. If a saved model's files are disconnected, reconnect them using `tim --library PATH` or explicitly choose another catalog model in setup. Finish or cancel running jobs before setup. Failed setup can be retried explicitly; verified completed files are reused. Esc returns from review to the catalog, then to Models. During setup, Esc leaves monitoring while shared backend setup may continue; quitting the last owned TIM session closes its backend. Your original request stays ready for a separate Enter to send after setup succeeds.
+
+Enter sends (Ctrl+S is an alias); Ctrl+J inserts a newline; Esc cancels; Ctrl+Q quits. `/help`, `/setup`, `/providers`, `/models`, `/model N`, `/agent N`, `/sessions` and `/tools` expose controls. `NO_COLOR=1` disables color; `TIM_ASCII=1` selects ASCII borders. The enlarged hero subtitle uses bold, tracked terminal cells, not independent font scaling.
+
+To review a long reply, press **Ctrl+P** for the previous page and **Ctrl+N** for the next page. **Ctrl+L** jumps to the latest text and resumes following the live reply. While you read earlier chat, the visible text stays in place as more tokens arrive; the line-position indicator shows where you are. These shortcuts also page through provider guides, reviews and model menus. On Mac, use the **Control** key, not Command. PageUp/PageDown still work; Option/Alt+Up/Down work when your terminal forwards modified arrows. On Mac keyboards, Fn+Up/Down may also send PageUp/PageDown. Plain Up/Down retain draft editing in chat, move one line through guides/reviews, and select rows in model menus.
+
+Two-finger trackpad scrolling and the mouse wheel scroll TIM's content when the terminal forwards mouse reports. Full-screen TIM enables reporting by default. In **Apple Terminal**, check **View → Allow Mouse Reporting**; the terminal must allow reporting as well as TIM requesting it. See [Apple's mouse-reporting instructions](https://support.apple.com/guide/terminal/turn-on-mouse-reporting-trmlc69728a5/mac). In **iTerm2**, enable **Profiles → Terminal → Enable mouse reporting** and **Report mouse wheel events**. See [iTerm2's terminal profile settings](https://iterm2.com/documentation-preferences-profiles-terminal.html).
+
+TIM follows the scroll direction your terminal reports, respecting macOS natural scrolling without adding an inversion. To use the terminal's own text selection and scrollback controls instead, launch **`tim --no-mouse`**. Ctrl+P/Ctrl+N/Ctrl+L remain available with mouse reporting disabled.
+
+### Response length and context
+
+New setups use **Auto** response length. Auto removes TIM's reply-token cap and uses the space left in the loaded model's context after your prompt. It cannot exceed the model's physical context, a provider's output limit or available memory. Existing saved numeric limits stay in effect until you change them. Auto does not start extra continuation requests.
+
+```sh
+tim --max-tokens auto
+tim --max-tokens 65536 --context 131072
+```
+
+Inside TIM, `/tokens` shows the current response setting, `/tokens auto` enables Auto, and `/tokens N` sets a manual response limit from 1 to 1,048,576 tokens. `/context N` sets the loaded context from 512 to 1,048,576 tokens; the model and engine must support your choice. Larger contexts use more RAM. The context must hold your instructions, conversation, source and reply together, so a manual response limit is a ceiling rather than a guaranteed answer length.
+
+In desktop Settings, choose **Response tokens → Auto** or **Manual limit**, then set **Context tokens** and save. Pipeline **Advanced settings → Response tokens** offers **Use Settings**, **Auto**, or **Manual limit**. Use Settings inherits the global response length; Auto explicitly removes the step's TIM reply cap. Both remain bounded by actual model/context limits.
 
 The CLI launcher selects the production React/Ink renderer before loading the UI when `NODE_ENV` is unset or empty. This keeps idle animation from accumulating development profiling records in Node's heap. Animation stays enabled; a larger heap is not required. Set `NODE_ENV=development` only for short debugging sessions: its profiling records can grow for as long as the UI runs. Launch through `tim`, `npm run cli`, or `node cli/index.mjs` so this initialization runs.
 
@@ -33,21 +66,66 @@ The CLI launcher selects the production React/Ink renderer before loading the UI
 Local models remain the default. Cloud access is explicit and never a fallback:
 
 ~~~sh
+tim providers
+tim providers openai
+tim providers xai
+tim providers anthropic
 tim models --provider openai
 tim models --provider xai
+tim models --provider anthropic
 tim --provider openai --model MODEL_ID_FROM_LIST
 tim --provider xai --model MODEL_ID_FROM_LIST
+tim --provider anthropic --model MODEL_ID_FROM_LIST
 tim install "a tool request" --provider openai --model MODEL_ID
 tim listen port 9999 --provider xai --model MODEL_ID
 tim read capture.pcap "show hex for port 9999" --provider openai --model MODEL_ID
 tim toolbox propose "a small tool request" --provider xai --model MODEL_ID
 ~~~
 
-The model list is fetched only on request. IDs are account-visible, not a capability guarantee: select a text model supporting the Responses API; planning additionally requires strict JSON-schema output. Unsupported model/schema requests fail clearly without falling back to plain text, another model or another provider. There is no hardcoded cloud model list. Local --model selects the model for chat and planning; /model N changes the local chat selection. TIM_PROVIDER and TIM_MODEL are optional environment-based selection references, overridden by flags. Cloud selection does not overwrite desktop/local defaults.
+### Connect ChatGPT, Grok or Claude from the terminal
 
-OpenAI reads OPENAI_API_KEY and xAI reads XAI_API_KEY from the **backend process environment**. With --url, these must already be available to that existing server. TIM does not prompt for, save or print keys. Consumer ChatGPT/Grok sign-in is not an API credential: API access and usage billing/credits are separate; TIM does not use a consumer subscription login. Development checks use dummy keys and mock HTTP only.
+You do not need the TIM desktop app, Model Library or a local model download. `tim providers` lists the choices, and `tim providers openai`, `tim providers xai` or `tim providers anthropic` prints the complete setup guide. Inside TIM, `/providers` opens the same guides; press P in the model chooser to open them. Use Tab or Left/Right to switch guides, Ctrl+P/Ctrl+N to page, and Ctrl+L to jump to the end. Up/Down move one line through the guide and PageUp/PageDown also work, including in an 80-column terminal.
 
-Both adapters use HTTPS POST /v1/responses with SSE, stream:true and store:false at api.openai.com or api.x.ai. No configurable arbitrary proxy endpoint, background response, vendor-hosted tool, file upload or reasoning transcript is enabled. store:false is not a promise of zero provider retention; provider policies still apply. Model discovery uses GET /v1/models. Cloud support covers text chat/code and typed install/listen/read/build planning, not desktop media, pipelines or autonomous agent mode.
+TIM connects to these providers' **model APIs**. Signing in to the ChatGPT, Grok or Claude website/app does not automatically sign TIM in. Create an API key in the provider account and check API access, billing and credits there. Subscription benefits vary by provider and plan; TIM does not use the consumer app login.
+
+| What you want to use | TIM provider | Create an API key | Environment variable |
+| --- | --- | --- | --- |
+| ChatGPT / OpenAI models | `openai` | [OpenAI API keys](https://platform.openai.com/api-keys) | `OPENAI_API_KEY` |
+| Grok / xAI models | `xai` | [xAI Console](https://console.x.ai), then API Keys for your team | `XAI_API_KEY` |
+| Claude / Anthropic models | `anthropic` | [Claude Console API keys](https://platform.claude.com/settings/keys); scope the key to your TIM workspace | `ANTHROPIC_API_KEY` |
+
+Quit TIM, then enter these commands in a normal terminal. On **macOS with zsh**, this example asks for the OpenAI key without displaying it or putting its value in your command history:
+
+```zsh
+read -r -s 'OPENAI_API_KEY?Paste your OpenAI API key: '
+export OPENAI_API_KEY
+printf '\n'
+tim models --provider openai
+tim --provider openai --model MODEL_ID
+```
+
+Paste your key only at the hidden-input prompt. Replace `MODEL_ID` with an exact text-model ID returned by the list command. For Grok, change `OPENAI_API_KEY` to `XAI_API_KEY` and `openai` to `xai`; for Claude, use `ANTHROPIC_API_KEY` and `anthropic`.
+
+For **Linux/bash**, use `read -r -s -p 'Paste your OpenAI API key: ' OPENAI_API_KEY` as the first command; the other commands are the same. On **Windows PowerShell**, use:
+
+```powershell
+$timApiKey = Read-Host 'Paste your OpenAI API key' -AsSecureString
+$timApiCredential = [System.Net.NetworkCredential]::new('', $timApiKey)
+$env:OPENAI_API_KEY = $timApiCredential.Password
+Remove-Variable timApiKey, timApiCredential
+tim models --provider openai
+tim --provider openai --model MODEL_ID
+```
+
+These examples set a key only for the current terminal session. A new terminal needs the key again, or a secret manager you configure. Do not paste keys into the TIM command box, source, screenshots or shared files. TIM reads keys from the **backend process environment** and does not prompt for, save or print them. With `--url`, set the key in the existing backend's terminal before starting that server; exporting it only in the connecting client terminal is insufficient. A missing-key error identifies the required variable. For 401/403 errors check the key and account permissions; for 429 check API credits and limits before retrying manually. Development checks use dummy keys and mock HTTP only.
+
+Official account/authentication guidance: [OpenAI API authentication](https://developers.openai.com/api/reference/overview), [xAI quickstart](https://docs.x.ai/developers/quickstart), and [Claude API keys](https://platform.claude.com/docs/en/get-api-key).
+
+### Model capabilities and activity
+
+The model list is fetched only on request. IDs are account-visible, not a capability guarantee: select a text model supporting the provider's API; planning additionally requires structured-output support. Unsupported model/schema requests fail clearly without falling back to plain text, another model or another provider. There is no hardcoded cloud model list. Local --model selects the model for chat and planning; /model N changes the local chat selection. TIM_PROVIDER and TIM_MODEL are optional environment-based selection references, overridden by flags. Cloud selection does not overwrite desktop/local defaults.
+
+OpenAI and xAI use HTTPS POST /v1/responses with SSE, stream:true and store:false at api.openai.com or api.x.ai. Anthropic uses its native streaming Messages API at api.anthropic.com. No configurable arbitrary proxy endpoint, background response, vendor-hosted tool, file upload or reasoning transcript is enabled. store:false is not a promise of zero provider retention; provider policies still apply. Model discovery uses GET /v1/models. Cloud support covers text chat/code and typed install/listen/read/build planning, not desktop media, pipelines or autonomous agent mode.
 
 The header names the provider; cloud startup opens a fresh session. Typed prompts, that cloud session's text history and planning requests go to the selected vendor. Local session history, attachments, artifacts, tool transcripts and packet contents are blocked from crossing that boundary automatically. Capture planning receives only the typed request. Toolbox draft planning may receive candidate names/status metadata after local recall. Do not paste secrets into prompts: this is not a general secret scanner.
 
@@ -256,6 +334,18 @@ is an alias, and Ctrl+J (or Alt+Enter where delivered) inserts a newline.
 Bracketed multiline paste never submits. BS/DEL Backspace, forward Delete,
 grapheme-aware arrows/deletion, Home/End, Ctrl+Left/Right, Ctrl+W, Ctrl+U and
 Ctrl+K support ordinary editing. Shift+Enter is not assumed portable.
+
+Long replies use Ctrl+P/Ctrl+N for earlier/later pages and Ctrl+L to return to
+the latest text and live following. Reading earlier chat stays anchored while
+new text streams in; the line indicator tracks the visible range. These page
+shortcuts also work in model menus, guides and reviews. Mac users hold Control,
+not Command. PageUp/PageDown and terminal-forwarded Option/Alt+Up/Down are
+alternatives; Fn+Up/Down may send page keys on a Mac keyboard. Plain arrows
+continue editing the chat draft or moving through the active menu/review.
+Two-finger trackpad or wheel scrolling also works when the terminal forwards
+mouse reports; full-screen TIM requests them by default. `tim --no-mouse`
+leaves text selection and scrollback gestures with the terminal. Scroll
+direction follows the terminal and macOS natural-scrolling setting.
 
 ```powershell
 tim check port 999

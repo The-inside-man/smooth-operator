@@ -120,7 +120,7 @@ export async function runAgent(studio, job, message, history, signal) {
     : `${studio.config.systemPrompt}\n\n${guidance}\n\n${instructions}\n\n${appGuide}`;
   const messages = [{ role: 'system', content: baseInstructions }, ...(appHelp ? helpHistory(history) : history)];
   const orchestrator = studio.orchestrator || studio.llama;
-  const orchestratorSettings = { ...studio.config, ...(appHelp ? { temperature: 0 } : {}), maxTokens: Math.min(studio.config.maxTokens || 1024, 1024), enableThinking: false };
+  const orchestratorSettings = { ...studio.config, ...(appHelp ? { temperature: 0 } : {}), maxTokens: studio.config.maxTokens ?? 0, enableThinking: false };
   job.children = []; message.steps = job.children;
   const ids = new Set();
   for (let step = 0; step <= maxSteps; step++) {
@@ -133,9 +133,15 @@ export async function runAgent(studio, job, message, history, signal) {
       : baseInstructions + (step > 0 ? '\n\nThe specialist has returned. Ground your answer in the actual returned tool results. Preserve returned code when the user requested code; do not invent code or missing source material. Explain failed or incomplete results honestly. Never claim the generated code was executed or tested.' : '');
     update(appHelp ? 'TIM guide: explaining the application.' : step === maxSteps ? 'Main agent: final response (tool limit reached).' : `Main agent: ${step ? 'reviewing specialist result' : 'considering request'}.`);
     const offeredTools = !appHelp && step < maxSteps ? tools : [];
-    const reply = await orchestrator.turn(messages, { ...orchestratorSettings, ...(step === 0 ? { toolChoice: requestedChoice } : {}) }, signal, offeredTools, usage => {
-      if (usage.removedMessages > 0) { job.contextUsage = usage; message.contextUsage = usage; studio.changed(); }
-    });
+    let reply;
+    try {
+      reply = await orchestrator.turn(messages, { ...orchestratorSettings, ...(step === 0 ? { toolChoice: requestedChoice } : {}) }, signal, offeredTools, usage => {
+        if (usage.removedMessages > 0) { job.contextUsage = usage; message.contextUsage = usage; studio.changed(); }
+      });
+    } catch (error) {
+      if (typeof error.partialText === 'string' && error.partialText.trim()) { message.content = error.partialText; studio.changed(); }
+      throw error;
+    }
     signal.throwIfAborted();
     const calls = reply.tool_calls || [];
     if (!Array.isArray(calls) || calls.length > 1) throw new Error('Main agent must return at most one structured tool call per step.');
@@ -179,6 +185,6 @@ export async function runAgent(studio, job, message, history, signal) {
       if (signal.aborted) throw error;
     } finally { child.finishedAt = Date.now(); await studio.persist(); studio.changed(); }
     messages.push({ role: 'assistant', content: null, tool_calls: [call] });
-    messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify({ resultId: child.id, model: model.name, status: child.status, ...child.result, text: child.result?.text?.slice(0, 12000), mediaInspection: 'No visual or audio inspection was performed.' }) });
+    messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify({ resultId: child.id, model: model.name, status: child.status, ...child.result, mediaInspection: 'No visual or audio inspection was performed.' }) });
   }
 }

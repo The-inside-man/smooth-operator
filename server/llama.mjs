@@ -82,27 +82,37 @@ export class Llama {
     return tokenized.tokens.length;
   }
   async prepareContext(body, signal) {
-    const responseTokens = Number.isInteger(body.max_tokens) && body.max_tokens > 0 ? body.max_tokens : 1024;
-    body = { ...body, max_tokens: responseTokens };
+    const automatic = body.max_tokens === undefined || body.max_tokens === 0 || body.max_tokens === -1;
+    let responseTokens = automatic ? 0 : body.max_tokens;
+    if (!automatic && (!Number.isSafeInteger(responseTokens) || responseTokens < 1 || responseTokens > 1048576)) throw new Error('Response tokens must be Auto (0) or an integer between 1 and 1048576.');
+    body = { ...body, max_tokens: automatic ? -1 : responseTokens };
     let messages = body.messages, removedMessages = 0;
     // The loaded process, rather than global Settings, determines the limit.
-    // In particular the persistent lightweight guide always loads at 4096.
+    // This also covers an engine that reports a smaller model-native context.
     if (!Number.isInteger(this.contextTokens) || this.contextTokens <= 0) return { body, removedMessages, promptTokens: null, responseTokens, method: 'engine' };
     let promptTokens = await this.countPrompt(body, signal);
-    while (promptTokens !== null && promptTokens + responseTokens + 16 > this.contextTokens) {
+    // Auto leaves useful room for an answer by removing only complete older
+    // turns when needed. The current request and its tool results stay intact.
+    const reserve = automatic ? Math.min(4096, Math.max(1, Math.floor(this.contextTokens / 2))) : responseTokens;
+    while (promptTokens !== null && promptTokens + reserve + 16 > this.contextTokens) {
       const reduced = removeOldestHistory(messages);
-      if (!reduced.removedMessages) throw contextLimitError({ promptTokens, responseTokens, contextTokens: this.contextTokens, fixedContext: this.fixedContext });
+      if (!reduced.removedMessages) {
+        if (automatic && promptTokens + 16 < this.contextTokens) break;
+        throw contextLimitError({ promptTokens, responseTokens: automatic ? 1 : responseTokens, contextTokens: this.contextTokens, fixedContext: this.fixedContext });
+      }
       messages = reduced.messages; removedMessages += reduced.removedMessages;
       promptTokens = await this.countPrompt({ ...body, messages }, signal);
     }
-    return { body: { ...body, messages }, removedMessages, promptTokens, responseTokens, method: promptTokens === null ? 'engine' : 'tokenizer' };
+    if (automatic && promptTokens !== null) responseTokens = this.contextTokens - promptTokens - 16;
+    return { body: { ...body, messages, max_tokens: automatic && promptTokens === null ? -1 : responseTokens }, removedMessages, promptTokens, responseTokens, method: promptTokens === null ? 'engine' : 'tokenizer' };
   }
   async requestWithContext(body, signal, receive, onContext) {
     let removedMessages = 0;
+    const automatic = body.max_tokens === undefined || body.max_tokens === 0 || body.max_tokens === -1;
     // Compatibility fallback is deliberately bounded and only reacts to an
     // explicit context error. Never estimate token counts from characters.
     for (let attempt = 0; attempt <= 8; attempt++) {
-      const prepared = await this.prepareContext(body, signal);
+      const prepared = await this.prepareContext(automatic ? { ...body, max_tokens: 0 } : body, signal);
       body = prepared.body; removedMessages += prepared.removedMessages;
       const notifyContext = () => onContext?.({ removedMessages, promptTokens: prepared.promptTokens, contextTokens: this.contextTokens, responseTokens: prepared.responseTokens, method: prepared.method });
       let emitted = false;
@@ -122,7 +132,11 @@ export class Llama {
       } catch (error) {
         const overflow = error.context || parseContextError(error.message);
         if (!overflow || emitted || signal?.aborted) { notifyContext(); throw error; }
+        const previousContext = this.contextTokens;
         if (overflow.contextTokens) this.contextTokens = overflow.contextTokens;
+        // A previously unknown/smaller native window changes Auto's budget;
+        // recompute it before removing any more conversation history.
+        if (automatic && overflow.contextTokens && overflow.contextTokens !== previousContext && attempt < 8) continue;
         const reduced = removeOldestHistory(body.messages);
         if (!reduced.removedMessages || attempt === 8) { notifyContext(); throw contextLimitError({ promptTokens: overflow.promptTokens, contextTokens: this.contextTokens, responseTokens: prepared.responseTokens, fixedContext: this.fixedContext }); }
         body = { ...body, messages: reduced.messages }; removedMessages += reduced.removedMessages;
@@ -141,7 +155,13 @@ export class Llama {
       ...(offeredTools.length ? { tools: offeredTools, tool_choice: forcedName ? 'required' : settings.toolChoice || 'auto', parallel_tool_calls: false } : { tool_choice: 'none' }) }, signal, async response => {
       const data = await response.json();
       const choice = data.choices?.[0];
-      if (choice?.finish_reason === 'length') throw new Error('Main agent response was truncated. Increase response tokens or shorten the request.');
+      if (choice?.finish_reason === 'length') {
+        const error = new Error(settings.maxTokens === 0 || settings.maxTokens === undefined
+          ? 'Main agent response was truncated at the available context limit. Increase Context tokens in Settings or use /context NUMBER, then retry.'
+          : 'Main agent response was truncated. Increase response tokens with /tokens auto or /tokens NUMBER, or increase Context tokens.');
+        if (!requiresTool && !choice.message?.tool_calls?.length && typeof choice.message?.content === 'string') error.partialText = choice.message.content;
+        throw error;
+      }
       if (data.error) { const error = new Error(data.error.message || 'Main agent returned an invalid response.'); error.context = parseContextError(data); throw error; }
       if (!choice?.message) throw new Error('Main agent returned an invalid response.');
       if (requiresTool && (!Array.isArray(choice.message.tool_calls) || !choice.message.tool_calls.length)) throw new Error('The local model did not call the requested specialist. Check engine/model tool-call compatibility or choose another agent model.');
@@ -179,6 +199,9 @@ export class Llama {
       pending += decoder.decode();
       if (pending.trim()) consume(pending);
       if (finishReason === 'length') {
+        if (settings.maxTokens === 0 || settings.maxTokens === undefined) throw new Error(hasAnswer
+          ? 'The model filled the available context before finishing. The partial answer was kept. Increase Context tokens in Settings or use /context NUMBER, then retry. Auto already uses the available response space.'
+          : 'The model filled the available context without producing an answer. Increase Context tokens in Settings or use /context NUMBER, then retry.');
         if (!hasAnswer && hasReasoning) throw new Error('The model used its response budget on reasoning before producing an answer. Try again, choose a different model, or increase Response tokens if Context tokens has room.');
         throw new Error(hasAnswer
           ? 'The model reached its response token limit before finishing. The partial answer was kept. Increase response tokens or shorten the request, then retry.'

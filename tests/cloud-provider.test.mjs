@@ -29,4 +29,25 @@ for(const provider of ['openai','xai']){
  test(provider+': dynamic model discovery makes only an explicit models request',async()=>{
   const ids=await listCloudModels(provider,{env,fetchImpl:async(url,options)=>{assert.match(url,/\/models$/);assert.equal(options.method,undefined);return Response.json({data:[{id:'current-user-choice'},{id:'bad\x1bmodel'}]});}});assert.deepEqual(ids,['current-user-choice']);
  });
+ test(provider+': Auto omits a TIM token cap and manual budgets use Responses max_output_tokens',async()=>{
+  for(const maxTokens of [0,65536,1048576]){
+   let calls=0;await generateCloud({provider,modelId:'test',messages:[],maxTokens,env,fetchImpl:async(url,options)=>{calls++;const body=JSON.parse(options.body);assert.equal(body.max_output_tokens,maxTokens||undefined);assert.equal(body.max_tokens,undefined);assert.equal(body.max_completion_tokens,undefined);return fixture([event('response.completed')])(url,options);}});assert.equal(calls,1);
+  }
+  for(const maxTokens of [-1,1.5,1048577,'8192',NaN])await assert.rejects(generateCloud({provider,modelId:'test',messages:[],maxTokens,env,fetchImpl:()=>assert.fail('invalid budget must not call API')}),/Response tokens/);
+ });
+ test(provider+': output-token and context cutoffs retain partial text with actionable errors',async()=>{
+  for(const maxTokens of [0,8192]){
+   const text=[];await assert.rejects(generateCloud({provider,modelId:'test',messages:[],maxTokens,env,onText:value=>text.push(value),fetchImpl:fixture([event('response.output_text.delta',{delta:'partial answer'}),event('response.incomplete',{response:{status:'incomplete',incomplete_details:{reason:'max_output_tokens'}}})])}),error=>{assert.match(error.message,/output-token limit.*Partial output retained/);assert.match(error.message,maxTokens?/\/tokens auto|raise/:/Auto already uses the provider limit/);return true;});assert.equal(text.join(''),'partial answer');
+  }
+  for(const type of ['response.failed','response.incomplete'])await assert.rejects(generateCloud({provider,modelId:'test',messages:[],env,fetchImpl:fixture([event(type,{response:{error:{code:'context_length_exceeded',message:env.OPENAI_API_KEY}}})])}),error=>/context limit.*cannot enlarge/.test(error.message)&&!error.message.includes(env.OPENAI_API_KEY));
+  await assert.rejects(generateCloud({provider,modelId:'test',messages:[],env,fetchImpl:fixture([event('response.completed',{response:{status:'incomplete',incomplete_details:{reason:'max_output_tokens'}}})])}),/output-token limit/);
+ });
+ test(provider+': long ordinary answers exceed 1 MiB while structured output stays bounded',async()=>{
+  const delta='x'.repeat(65536),frames=[...Array.from({length:20},()=>event('response.output_text.delta',{delta})),event('response.completed')];let size=0;
+  await generateCloud({provider,modelId:'test',messages:[],env,fetchImpl:fixture(frames),onText:chunk=>{size+=chunk.length;}});assert.equal(size,delta.length*20);
+  await assert.rejects(generateCloud({provider,modelId:'test',messages:[],intentKind:'read',env,fetchImpl:fixture(frames)}),/structured output exceeded/);
+ });
 }
+test('OpenAI manual token budgets below the Responses API minimum fail before inference',async()=>{
+ for(const maxTokens of [1,15])await assert.rejects(generateCloud({provider:'openai',modelId:'test',messages:[],maxTokens,env,fetchImpl:()=>assert.fail('unsupported budget must not call API')}),/at least 16.*\/tokens auto/);
+});

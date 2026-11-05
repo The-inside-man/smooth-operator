@@ -101,3 +101,66 @@ test('guide is bounded and missing app state is safe', () => {
 });
 
 test('terminal help explains user-reviewed workflows without adding chat execution authority',()=>{const guide=buildAppGuide({request:'How do I use the TIM CLI toolbox?'});assert.match(guide,/searches it before generating an unexecuted draft/);assert.match(guide,/not chat tools/);assert.ok(guide.length<=APP_GUIDE_MAX_CHARS);});
+
+test('CLI help retrieves terminal-only local setup and all three cloud provider guides within the manual budget',()=>{
+ for(const request of ['How do I set up the TIM CLI without opening the frontend?','How can I connect ChatGPT, Grok or Claude in the TIM terminal?']){
+  assert.equal(isAppHelpRequest(request),true);assert.deepEqual(appGuideTopics(request),['terminal']);
+  const guide=buildAppGuide({request,studio:{registry:{models:[],runtimes:{}},pipelines:{definitions:[],runs:[]}}});
+  assert.match(guide,/tim CLI starts without the graphical frontend/);
+  for(const command of ['tim setup','/setup','press S in the model chooser','tim providers openai','tim providers xai','tim providers anthropic','/providers or P in the model chooser','--provider openai|xai|anthropic --model ID'])assert.ok(guide.includes(command),command);
+  assert.match(guide,/all supported chat\/code catalog downloads/);
+  assert.match(guide,/\/models combines installed models/);
+  assert.match(guide,/\/model N and \/agent N use these same row numbers, including imports/);
+  assert.match(guide,/Enter selects installed rows or reviews a download/);
+  assert.match(guide,/Chat\/Code keep the main agent; \/agent N changes it/);
+  assert.match(guide,/larger Qwen3 and Qwen2\.5 Coder models/);
+  assert.match(guide,/Suggested models use fresh memory estimates; no speed\/load guarantee/);
+  assert.match(guide,/Review size\/memory\/destination; Enter confirms setup/);
+  assert.match(guide,/No download starts before review confirmation/);assert.match(guide,/No fallback to a smaller model/);
+  assert.match(guide,/verification and loading progress/);
+  assert.match(guide,/saved request needs a separate Enter/);
+  for(const provider of ['ChatGPT/OpenAI','Grok/xAI','Claude/Anthropic'])assert.ok(guide.includes(provider),provider);
+  assert.match(guide,/Keep keys out of the TIM prompt/);
+  assert.match(guide,/user-operated terminal commands, not chat tools/);assert.match(guide,/Descriptive application help grants no extra tools or permissions/);
+  assert.match(guide,/CURRENT APP FACTS/);assert.ok(guide.length<=APP_GUIDE_MAX_CHARS);
+ }
+});
+
+test('Mac terminal scrolling help explains Control shortcuts and keeps the complete topic with maximal live facts',()=>{
+ const kinds=['chat','image','video','upscale','transcribe'];
+ const studio={registry:{models:Array.from({length:10000},(_,index)=>({kind:kinds[index%kinds.length],available:true})),runtimes:Object.fromEntries(kinds.map(kind=>[kind,{}]))},orchestrator:{modelId:'guide'},llama:{modelId:'specialist'},pipelines:{definitions:Array(10000).fill({}),runs:Array(10000).fill({})}};
+ const request='How do I scroll through long messages in the TIM terminal on my Mac?';
+ assert.deepEqual(appGuideTopics(request),['terminal']);
+ const guide=buildAppGuide({request,studio});
+ assert.match(guide,/Ctrl\+P\/Ctrl\+N page up\/down/);
+ assert.match(guide,/Two-finger trackpad\/wheel scrolling is enabled in full-screen TIM when the terminal forwards mouse reports/);
+ assert.match(guide,/Mac Terminal: View > Allow Mouse Reporting/);
+ assert.match(guide,/iTerm2: Profiles > Terminal > Enable mouse reporting and Report mouse wheel events/);
+ assert.match(guide,/TIM follows macOS natural scrolling without inversion/);
+ assert.match(guide,/tim --no-mouse leaves selection\/scrollback to the terminal; keyboard scrolling still works/);
+ assert.match(guide,/Ctrl\+L returns to latest text and live scrolling/);
+ assert.match(guide,/Mac uses Control, not Command/);
+ assert.match(guide,/PageUp\/Down and forwarded Option\/Alt\+Up\/Down also page/);
+ assert.match(guide,/Earlier chat stays anchored as tokens stream; a line indicator shows position/);
+ assert.match(guide,/Plain arrows edit chat drafts or move through guides, reviews and menus/);
+ assert.match(guide,/user-operated terminal commands, not chat tools/);
+ assert.match(guide,/"installedModels":10000/);assert.match(guide,/"savedPipelines":10000/);
+ assert.match(guide,/"availableKinds":\["chat","image","video","upscale","transcribe"\]/);
+ assert.ok(guide.length<=APP_GUIDE_MAX_CHARS);
+});
+
+test('response-length help explains Auto, manual limits, context memory and explicit CLI settings',()=>{
+ const settings=buildAppGuide({request:'Where do I set Response tokens and Context tokens in Settings?'});
+ assert.match(settings,/Response tokens offers Auto or Manual limit \(1–1048576\)/);
+ assert.match(settings,/Auto removes TIM’s reply cap and uses remaining context/);
+ assert.match(settings,/actual model\/provider limits still apply/);
+ assert.match(settings,/Context tokens accepts 512–1048576 for Agent, Chat\/Code and pipeline models/);
+ assert.match(settings,/larger contexts use more memory/);assert.match(settings,/default context is 4096/);
+ assert.match(settings,/Pipeline Advanced settings can inherit Settings, explicitly choose Auto, or set a manual limit/);
+ assert.match(settings,/Auto does not start continuation requests/);assert.doesNotMatch(settings,/guide remains fixed at 4096/);
+ const terminal=buildAppGuide({request:'How do I change the TIM CLI response length?'});
+ for(const command of ['/tokens shows response length','/tokens auto','/tokens N','/context N','--max-tokens auto|N --context N'])assert.ok(terminal.includes(command),command);
+ assert.match(terminal,/Auto uses remaining context; model\/provider limits still apply/);
+ assert.match(terminal,/Larger contexts use more RAM; no automatic continuation/);
+ assert.ok(settings.length<=APP_GUIDE_MAX_CHARS);assert.ok(terminal.length<=APP_GUIDE_MAX_CHARS);
+});

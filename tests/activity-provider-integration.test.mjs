@@ -9,6 +9,7 @@ import {startServer} from '../server/index.mjs';
 import {generateCloud} from '../server/cloud-provider.mjs';
 import {Client} from '../cli/core.mjs';
 import {activity,selection} from '../cli/activity.mjs';
+import {loadSelection,saveSelection} from '../cli/preferences.mjs';
 import {modelIntent} from '../cli/planner.mjs';
 import {ToolRunner,makeReview} from '../cli/tool-runner.mjs';
 const wait=ms=>new Promise(r=>setTimeout(r,ms));
@@ -16,13 +17,18 @@ async function settled(studio,id){for(let i=0;i<150;i++){const job=studio.jobs.f
 test('clock is independent of backend activity and never fabricates ETA',()=>{
  const job={startedAt:1000,lastActivityAt:2000};const a=activity(job,62000),b=activity(job,63000);assert.equal(a.age,60);assert.ok(a.stale);assert.equal(b.age,61);assert.match(b.text,/ETA unavailable/);assert.match(b.heartbeat,/unconfirmed/);assert.equal(activity({startedAt:1000,finishedAt:3000,lastActivityAt:2000},99999).elapsed,2);
  assert.deepEqual(selection({},{}),{provider:'local',modelId:''});assert.throws(()=>selection({provider:'xai'},{}),/model/);assert.equal(selection({provider:'openai',model:'current-model'},{}).modelId,'current-model');
+ assert.deepEqual(selection({provider:'anthropic',model:'claude-fixture'},{}),{provider:'anthropic',modelId:'claude-fixture'});assert.throws(()=>selection({provider:'anthropic'},{}),/model/);
 });
-test('queue and planner use both explicit cloud adapters; sessions never export local history; duplicate IDs are idempotent',async()=>{
+test('Claude selection persists provider and model IDs without credentials',async()=>{
+ const root=await fs.mkdtemp(path.join(os.tmpdir(),'tim-claude-selection-'));
+ try{await saveSelection(root,{provider:'anthropic',modelId:'claude-fixture',apiKey:'DO NOT STORE'});assert.deepEqual(await loadSelection(root),{provider:'anthropic',modelId:'claude-fixture'});assert.doesNotMatch(await fs.readFile(path.join(root,'cli-selection.json'),'utf8'),/DO NOT STORE/);}finally{await fs.rm(root,{recursive:true,force:true});}
+});
+test('queue and planner use all explicit cloud adapters; sessions never export local history; duplicate IDs are idempotent',async()=>{
  const root=await fs.mkdtemp(path.join(os.tmpdir(),'tim-cloud-test-'));let backend;const calls=[];let malicious=false;
  try{
-  const library=path.join(root,'library');await fs.mkdir(path.join(library,'Coding-Models'),{recursive:true});backend=await startServer({port:0,dataDir:path.join(root,'data'),libraryRoot:library,autoSetup:false,telemetry:false});const {studio}=backend;
-  studio.generateCloud=options=>generateCloud({...options,env:{OPENAI_API_KEY:'dummy',XAI_API_KEY:'dummy'},fetchImpl:async(url,request)=>{const body=JSON.parse(request.body);calls.push({url,body});const intent=body.text?.format.name==='tim_install'?{action:'install',package:'example',manager:'npm',reason:'fixture'}:body.text?.format.name==='tim_listen'?{action:'listen',mode:'bind',protocol:'tcp',port:9999,host:'127.0.0.1',reason:'fixture'}:{action:'read',view:'hex',filter:'',reason:'fixture'};return new Response('data: '+JSON.stringify({type:'response.output_text.delta',delta:JSON.stringify(malicious?{...intent,command:'untrusted arbitrary shell'}:intent)})+'\n\ndata: {"type":"response.completed"}\n\n',{headers:{'content-type':'text/event-stream'}});}});
-  for(const provider of ['openai','xai']){
+  const library=path.join(root,'library');await fs.mkdir(path.join(library,'Coding-Models'),{recursive:true});backend=await startServer({port:0,dataDir:path.join(root,'data'),libraryRoot:library,autoSetup:false,telemetry:false});const {studio}=backend;studio.config.maxTokens=8192;
+  studio.generateCloud=options=>generateCloud({...options,env:{OPENAI_API_KEY:'dummy',XAI_API_KEY:'dummy',ANTHROPIC_API_KEY:'dummy'},fetchImpl:async(url,request)=>{const body=JSON.parse(request.body);calls.push({url,body});const kind=body.text?.format.name?.slice(4)||body.output_config?.format.schema.properties.action.const;const intent=kind==='install'?{action:'install',package:'example',manager:'npm',reason:'fixture'}:kind==='listen'?{action:'listen',mode:'bind',protocol:'tcp',port:9999,host:'127.0.0.1',reason:'fixture'}:{action:'read',view:'hex',filter:'',reason:'fixture'};const value=JSON.stringify(malicious?{...intent,command:'untrusted arbitrary shell'}:intent);const events=url.endsWith('/messages')?[{type:'message_start',message:{role:'assistant',content:[]}},{type:'content_block_start',index:0,content_block:{type:'text',text:''}},{type:'content_block_delta',index:0,delta:{type:'text_delta',text:value}},{type:'content_block_stop',index:0},{type:'message_delta',delta:{stop_reason:'end_turn'}},{type:'message_stop'}]:[{type:'response.output_text.delta',delta:value},{type:'response.completed'}];return new Response(events.map(event=>'data: '+JSON.stringify(event)+'\n\n').join(''),{headers:{'content-type':'text/event-stream'}});}});
+  for(const provider of ['openai','xai','anthropic']){
    const client=new Client(backend.url,{provider,modelId:'selected-fixture'});
    for(const kind of ['install','listen','read'])assert.equal((await modelIntent(client,kind,'typed fixture request')).action,kind);
    malicious=true;await assert.rejects(modelIntent(client,'read','typed fixture request'),/unsupported fields/);malicious=false;
@@ -44,7 +50,7 @@ test('queue and planner use both explicit cloud adapters; sessions never export 
   await studio.resetTimings();assert.equal(studio.timings.export().buckets.length,0);
   const local=await studio.newSession();local.messages.push({role:'user',content:'private local history'});
   await assert.rejects(studio.enqueue({provider:'openai',modelId:'test',kind:'chat',sessionId:local.id,prompt:'new'}),/boundary/);
-  assert.ok(!JSON.stringify(calls).includes('private local history'));assert.ok(calls.every(c=>c.body.input.every(m=>typeof m.content==='string')));
+  assert.ok(!JSON.stringify(calls).includes('private local history'));assert.ok(calls.every(c=>(c.body.input||c.body.messages).every(m=>typeof m.content==='string')));
  }finally{await backend?.close();await fs.rm(root,{recursive:true,force:true});}
 });
 test('backend comments update transport only, stale stream fails, reconnect does not POST',async()=>{
