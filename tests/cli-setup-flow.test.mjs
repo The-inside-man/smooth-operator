@@ -132,7 +132,7 @@ test('startSetup opens the catalog directly and requires separate model review a
   assert.equal(app.calls.filter(call=>call.route==='setup').length,0);
   await app.key('\r');await app.wait(()=>app.calls.some(call=>call.route==='setup'),'startSetup explicit review confirmation');
   assert.equal(app.calls.filter(call=>call.route==='setup').length,1);assert.equal(app.calls.filter(call=>call.route==='jobs').length,0);
-  await app.push(ready());await app.wait(()=>app.selections.length===1,'startSetup completion');
+  await app.push(ready());await app.wait(()=>app.selections.length===1&&app.output.includes('Local model ready: '+target.name)&&app.output.includes(request),'startSetup completion and restored composer frame');
   assert.ok(app.output.includes(request));assert.equal(app.calls.filter(call=>call.route==='jobs').length,0);
  }finally{await app.close();}
 });

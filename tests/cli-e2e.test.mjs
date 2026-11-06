@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import {spawn} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
+import {setTimeout as delay} from 'node:timers/promises';
 import {demoState} from '../cli/core.mjs';
 
 test('synthetic terminal through HTTP adapter: rejected send, retry, streamed rendering and cancellation',async()=>{
@@ -45,13 +46,26 @@ test('synthetic terminal through HTTP adapter: rejected send, retry, streamed re
  }finally{clearTimeout(timeout);child?.kill();stream?.end();server.closeAllConnections();await new Promise(r=>server.close(r));}
 });
 
-test('real Ink key sequences: BS/DEL/Delete, graphemes, bracketed paste, Enter and resize preserve request',async()=>{
+test('slow startup and real Ink key sequences preserve editing, paste, Enter and resize behavior',async()=>{
  const state=structuredClone(demoState);state.models=[{id:'fixture-agent',name:'Fixture agent',kind:'chat',available:true}];state.config.mainAgentModelId='fixture-agent';let stream,child,output='',received;
- const server=http.createServer(async(req,res)=>{if(req.url==='/api/events'){stream=res;res.writeHead(200,{'content-type':'text/event-stream'});res.write('data: '+JSON.stringify(state)+'\n\n');return;}res.setHeader('content-type','application/json');if(req.url==='/api/sessions'){res.end(JSON.stringify(state.sessions[0]));return;}if(req.url==='/api/state'){res.end(JSON.stringify(state));return;}let raw='';for await(const c of req)raw+=c;if(req.url==='/api/jobs'){received=JSON.parse(raw);res.end(JSON.stringify({id:'edit-job',sessionId:'demo'}));return;}res.end('{}');});await new Promise(r=>server.listen(0,'127.0.0.1',r));
- const delay=ms=>new Promise(r=>setTimeout(r,ms));
- try{child=spawn(process.execPath,[fileURLToPath(new URL('./tty-fixture.mjs',import.meta.url))],{stdio:['pipe','pipe','pipe'],env:{...process.env,TIM_TEST_URL:`http://127.0.0.1:${server.address().port}`}});child.stdout.on('data',c=>output+=c);let errors='';child.stderr.on('data',c=>errors+=c);
- for(let i=0;i<100&&!output.includes('COMMAND');i++)await delay(20);assert.match(output,/COMMAND/);
+ const server=http.createServer(async(req,res)=>{if(req.url==='/api/events'){stream=res;res.writeHead(200,{'content-type':'text/event-stream'});res.write('data: '+JSON.stringify(state)+'\n\n');return;}res.setHeader('content-type','application/json');if(req.url==='/api/sessions'){res.end(JSON.stringify(state.sessions[0]));return;}if(req.url==='/api/state'){await delay(2200);res.end(JSON.stringify(state));return;}let raw='';for await(const c of req)raw+=c;if(req.url==='/api/jobs'){received=JSON.parse(raw);res.end(JSON.stringify({id:'edit-job',sessionId:'demo'}));return;}res.end('{}');});await new Promise(r=>server.listen(0,'127.0.0.1',r));
+ // The state fixture deliberately takes longer than the old two-second startup limit.
+ let errors='',spawnError,closed=false,exitCode,exitSignal;
+ const waitFor=async(predicate,label)=>{
+  // Cold imports on shared runners can exceed two seconds. Wait for the actual
+  // observable state, fail promptly on child exit, and keep every wait bounded.
+  const deadline=Date.now()+15000;
+  while(!predicate()){
+   if(spawnError||closed||Date.now()>=deadline)assert.fail(label+'\n'+(spawnError?.stack||errors)+'\nexit: '+exitCode+' / '+exitSignal+'\n'+output.slice(-4000));
+   await delay(20);
+  }
+ };
+ try{child=spawn(process.execPath,[fileURLToPath(new URL('./tty-fixture.mjs',import.meta.url))],{stdio:['pipe','pipe','pipe','ipc'],env:{...process.env,TIM_TEST_URL:`http://127.0.0.1:${server.address().port}`}});child.stdout.on('data',c=>output+=c);child.stderr.on('data',c=>errors+=c);
+ child.on('error',error=>{spawnError=error;});child.on('close',(code,signal)=>{closed=true;exitCode=code;exitSignal=signal;});
+ await waitFor(()=>output.includes('COMMAND'),'CLI must render its composer before receiving keys');assert.match(output,/COMMAND/);
+ const beforeResize=output.length;child.send({type:'resize-terminal'});
+ await waitFor(()=>output.slice(beforeResize).includes('COMMAND'),'CLI must redraw its composer after terminal resize');
  for(const key of ['abc','\x7f','\b','界👩‍💻','\x1b[D','\x1b[3~','\x1b[H','Z','\x1b[F','\x1b[200~','\nline\r\nlast','\x1b[201~']){child.stdin.write(key);await delay(35);}
- assert.equal(received,undefined,'paste must not submit');child.stdin.write('\r');for(let i=0;i<100&&!received;i++)await delay(20);assert.equal(received?.prompt,'Za界\nline\nlast',errors);child.stdin.write('\x11');await new Promise(r=>child.on('close',r));assert.match(output,/\x1b\[\?2004l/);assert.doesNotMatch(output.slice(output.lastIndexOf('\x1b[?1049l')),/\x1b\[(?:[0-9]*[JK]|H)/,'renderer cleanup must finish before restoring the original screen');
+ assert.equal(received,undefined,'paste must not submit');child.stdin.write('\r');await waitFor(()=>received!==undefined,'Enter must submit the edited request');assert.equal(received?.prompt,'Za界\nline\nlast',errors);child.stdin.write('\x11');await waitFor(()=>closed,'CLI must exit after Ctrl+Q');assert.equal(exitCode,0,errors);assert.match(output,/\x1b\[\?2004l/);assert.doesNotMatch(output.slice(output.lastIndexOf('\x1b[?1049l')),/\x1b\[(?:[0-9]*[JK]|H)/,'renderer cleanup must finish before restoring the original screen');
  }finally{child?.kill();stream?.end();server.closeAllConnections();await new Promise(r=>server.close(r));}
 });
