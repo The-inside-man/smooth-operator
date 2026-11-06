@@ -23,7 +23,8 @@ export function localSetupStatus(snapshot={}, {catalogId:requestedId,mode='agent
  const setup=snapshot.localSetup?.catalogId===catalogId&&(snapshot.localSetup.mode||'agent')===mode?snapshot.localSetup:null;
  const runtimeAvailable=Boolean(snapshot.engines?.chat?.available);
  const configuredMissing=Boolean(!specialist&&!explicit&&configuredId&&!model);
- const targetLoaded=Boolean(model&&(snapshot.loadedModelId===model.id||(snapshot.loadedModels||[]).some(loaded=>loaded.modelId===model.id&&['specialist','chat','code'].includes(loaded.role))));
+ const guideResident=Boolean(model&&model.id===configuredId&&guide.modelId===model.id&&guide.status==='running'&&guide.loaded!==false&&!guide.error);
+ const targetLoaded=Boolean(model&&(snapshot.loadedModelId===model.id||(snapshot.loadedModels||[]).some(loaded=>loaded.modelId===model.id&&(['specialist','chat','code'].includes(loaded.role)||loaded.role==='guide'&&model.id===configuredId))||guideResident));
  const base={configuredId,configuredMissing,catalogId,mode,model,entry,download,runtime,setup,targetLoaded,dataDir:snapshot.dataDir||'',runtimeAvailable,ready:false,error:null,progress:null};
  // An explicit attempt preserves the prior default until warm-up succeeds.
  // Its old errors (and a previous failed download) must not abort the retry.

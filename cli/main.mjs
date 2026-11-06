@@ -49,6 +49,8 @@ TIM_PROVIDER / TIM_MODEL can select the provider without changing stored setting
 ${help}
 Enter sends; Ctrl+S also sends; Ctrl+J or Alt+Enter inserts a newline; Esc cancels; Ctrl+Q quits.
 Ctrl+P previous page; Ctrl+N next page; Ctrl+L latest output (Control on Mac, not Command).
+Up/Down recalls older/newer requests and commands; Down past newest restores your draft.
+Review recalled text, then Enter runs it again. Multiline drafts keep line navigation until a boundary.
 Two-finger trackpad / mouse wheel scrolls content when terminal mouse reporting is allowed.
 --no-mouse keeps native terminal selection/scrollback; keyboard scrolling remains available.
 First run: choose an available model when prompted. /models reopens the chooser.

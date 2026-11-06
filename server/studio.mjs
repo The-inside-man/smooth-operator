@@ -193,7 +193,8 @@ export class Studio extends EventEmitter {
           const next={...this.config,mainAgentModelId:model.id};
           await this.store.write('settings',next);this.config=next;
         }else{
-          await this.loadChat(model,this.lifecycle.signal,()=>this.changed());this.llama.pin?.(model.id);
+          if(model.id===this.config.mainAgentModelId)await this.loadOrchestrator(model,this.lifecycle.signal,()=>this.changed());
+          else await this.loadChat(model,this.lifecycle.signal,()=>this.changed());
         }
         this.localSetup={...identity,status:'ready'};this.changed();
       }catch(error){
@@ -262,13 +263,14 @@ export class Studio extends EventEmitter {
   async unloadModel(id) {
     if(this.setupPromise&&this.localSetup.explicit)throw new Error('Wait for local model setup to finish before unloading a model.');
     if (this.active || this.loadingModel || this.guideLoadPromise || this.jobs.some(j => j.status === 'queued')) throw new Error('Finish or cancel current work before unloading.');
-    if (id && id === this.config.mainAgentModelId) throw new Error('The lightweight TIM guide stays loaded. Other models can be unloaded.');
+    const specialist = id && (this.llama.has?.(id) || this.llama.modelId === id), pipelineAgent = id && this.pipelineAgent?.modelId === id;
+    if (id && id === this.orchestrator.modelId && !specialist && !pipelineAgent) throw new Error('The lightweight TIM guide stays loaded. Other models can be unloaded.');
     this.loadingModel = true; this.changed();
     try {
       if (!id) { await this.unloadSpecialists(); await this.pipelineAgent?.unload(); }
       else {
-        if (this.llama.has?.(id) || this.llama.modelId === id) await this.llama.unload(id);
-        if (this.pipelineAgent?.modelId === id) await this.pipelineAgent.unload();
+        if (specialist) await this.llama.unload(id);
+        if (pipelineAgent) await this.pipelineAgent.unload();
       }
       await this.sampleMemory();
     } finally { this.loadingModel = false; this.changed(); }
@@ -568,9 +570,11 @@ export class Studio extends EventEmitter {
     let timedOut = false;
     const timer = job.kind === 'agent' ? setTimeout(() => { timedOut = true; controller.abort(new Error('Main agent turn timed out.')); }, (this.config.agentTimeoutSeconds ?? 600) * 1000) : null;
     const model = job.provider && job.provider !== 'local' ? {id:job.modelId,name:job.modelName,kind:'chat',available:true} : this.registry.models.find(m => m.id === job.modelId);
+    const guideChat = job.kind === 'chat' && (!job.provider || job.provider === 'local') && model?.id === this.config.mainAgentModelId;
+    const chatEngine = guideChat ? this.orchestrator : this.llama;
     const session = this.sessions.find(s => s.id === job.sessionId);
     const message = session.messages.find(m => m.jobId === job.id);
-    this.active.timing=new TimedRun(this.timings,modelTimingKey(job,this.config,this.llama.modelId===job.modelId));
+    this.active.timing=new TimedRun(this.timings,modelTimingKey(job,this.config,chatEngine.modelId===job.modelId));
     job.status = message.status = 'running'; job.startedAt = Date.now(); job.phase = 'Preparing engine…'; this.changed();
     try {
       if (!job.provider || job.provider === 'local') await this.pipelineAgent?.unload();
@@ -578,8 +582,10 @@ export class Studio extends EventEmitter {
       if (['chat', 'agent'].includes(job.kind)) {
         const update = phase => { this.active?.timing?.touch();this.active?.phaseTiming?.touch();job.phase = phase; job.lastActivityAt=Date.now(); this.changed(); };
         if (job.kind === 'chat' && (!job.provider || job.provider === 'local')) {
-          if(this.llama.modelId!==model.id)this.active.phaseTiming=new TimedRun(this.timings,timingKey({provider:'local',model:model.id,operation:'load-cold',backend:this.config.backend,context:this.config.context}));
-          update('Loading local model'); await this.loadChat(model, controller.signal, update);
+          if(chatEngine.modelId!==model.id)this.active.phaseTiming=new TimedRun(this.timings,timingKey({provider:'local',model:model.id,operation:'load-cold',backend:guideChat?'cpu':this.config.backend,context:this.config.context}));
+          update('Loading local model');
+          if(guideChat)await this.loadOrchestrator(model,controller.signal,update);
+          else await this.loadChat(model, controller.signal, update);
           this.active.phaseTiming?.finish('completed');delete this.active.phaseTiming;
         }
         const history = [];
@@ -592,7 +598,7 @@ export class Studio extends EventEmitter {
         update('Waiting for model output');
         if (job.kind === 'agent') await runAgent(this, job, message, history, controller.signal);
         else if (job.provider && job.provider !== 'local') await (this.generateCloud || generateCloud)({provider:job.provider,modelId:job.modelId,messages:[{role:'system',content:'You are TIM Studio. Give clear practical answers. Do not claim to execute tools.'},...history],maxTokens:this.config.maxTokens, intentKind:job.intentKind,signal:controller.signal,onActivity:phase=>update(phase),onText:token=>{message.content+=token;this.changed();}});
-        else await this.llama.generate([{ role: 'system', content: this.config.systemPrompt }, ...history], { ...this.config, enableThinking: false }, controller.signal, token => { message.content += token; job.lastActivityAt=Date.now(); job.phase='Generating response'; this.changed(); }, usage => {
+        else await chatEngine.generate([{ role: 'system', content: this.config.systemPrompt }, ...history], { ...this.config, enableThinking: false }, controller.signal, token => { message.content += token; job.lastActivityAt=Date.now(); job.phase='Generating response'; this.changed(); }, usage => {
           if (usage.removedMessages > 0) { job.contextUsage = usage; message.contextUsage = usage; this.changed(); }
         });
         if (!message.content.trim()) throw new Error('The model returned no answer. Try again or choose a different model.');
@@ -616,7 +622,7 @@ export class Studio extends EventEmitter {
       job.phase = timedOut ? 'Main agent turn timed out.' : controller.signal.aborted ? (job.provider && job.provider !== 'local' ? 'Cancelled locally; provider stopping/billing not confirmed.' : 'Cancelled') : error.message;
       message.error = job.phase;
       if (model && !controller.signal.aborted) model.validation = 'Last run failed';
-      if (['chat', 'agent'].includes(job.kind) && (!job.provider || job.provider === 'local')) await this.releaseSpecialist();
+      if (['chat', 'agent'].includes(job.kind) && (!job.provider || job.provider === 'local') && !guideChat) await this.releaseSpecialist();
     } finally {
       clearTimeout(timer); job.finishedAt = Date.now(); job.timing=this.active.timing?.finish(job.status);this.active.phaseTiming?.finish(job.status);await this.store.write('timings',this.timings.export()).catch(()=>{});this.active = null; await this.persist(); this.changed();
       if (!this.closing) queueMicrotask(() => this.drain().catch(e => this.emit('error', e)));

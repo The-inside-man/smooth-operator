@@ -62,7 +62,7 @@ async function fixture(t) {
   await studio.orchestrator.load(studio.registry.models[0], studio.registry.runtimes.chat, studio.lifecycle.signal, () => {}, 4096, true);
   await studio.sampleMemory();
   t.after(async () => { await studio.close(); await fs.rm(dir, { recursive: true, force: true }); });
-  return { studio, events, memory, makeEngine };
+  return { studio, dir, events, memory, makeEngine };
 }
 
 async function settled(studio, jobId) {
@@ -124,6 +124,110 @@ test('normal chat reuses a pinned specialist and leaves other manually loaded mo
   assert.ok(studio.llama.instances().every(row => row.pinned));
   assert.equal(events.includes('unload:writer'), false);
   assert.equal(studio.sessions[0].messages.at(-1).content, 'coder completed');
+});
+
+test('ordinary Chat and Code reuse the resident guide without allocating duplicate weights', async t => {
+  const { studio, events, memory } = await fixture(t);
+  await studio.loadModel('coder');
+  await studio.warmGuide();
+  const guideChild=studio.orchestrator.child,coderChild=studio.llama.child;
+  const loadCount=events.filter(event=>event==='load:guide').length;
+  studio.catalog.find(entry=>entry.id==='guide').memoryGB=4.5;
+  memory.budgetBytes=2.5*GiB;
+  const generated=[];
+  studio.orchestrator.generate=async function (_messages,_settings,signal,onToken,onContext) {
+    assert.equal(this,studio.orchestrator);signal.throwIfAborted();generated.push(this.child);
+    onToken('The resident guide ');onToken('answered.');
+    onContext({removedMessages:2,promptTokens:1000,contextTokens:4096,responseTokens:1024,method:'tokenizer'});
+  };
+  for(const kind of ['chat','code']){
+    const job=await studio.enqueue({kind,modelId:'guide',prompt:'Use the model already in memory'});
+    await settled(studio,job.id);
+    assert.equal(job.status,'completed',job.phase);assert.ok(job.lastActivityAt);
+    const message=studio.sessions.find(session=>session.id===job.sessionId).messages.find(message=>message.jobId===job.id);
+    assert.equal(message.content,'The resident guide answered.');assert.equal(message.contextUsage.contextTokens,4096);assert.equal(job.contextUsage.removedMessages,2);
+  }
+  assert.deepEqual(generated,[guideChild,guideChild]);
+  assert.equal(events.filter(event=>event==='load:guide').length,loadCount);
+  assert.equal(studio.orchestrator.child,guideChild);assert.equal(studio.llama.child,coderChild);
+  assert.deepEqual(ids(studio),['coder','guide']);assert.equal(studio.llama.has('guide'),false);
+});
+
+test('cancelling guide Chat preserves its process and unrelated pinned specialists for the next turn', async t => {
+  const {studio,events}=await fixture(t);
+  await studio.loadModel('coder');await studio.warmGuide();
+  const guideChild=studio.orchestrator.child,coderChild=studio.llama.child,generate=studio.orchestrator.generate;
+  let start;const started=new Promise(resolve=>{start=resolve;});
+  studio.orchestrator.generate=async (_messages,_settings,signal,onToken)=>{
+    onToken('Useful partial text');start();
+    await new Promise((_resolve,reject)=>signal.addEventListener('abort',()=>reject(signal.reason),{once:true}));
+  };
+  const job=await studio.enqueue({kind:'chat',modelId:'guide',prompt:'An interruptible request'});
+  await started;await studio.cancel(job.id);await settled(studio,job.id);
+  assert.equal(job.status,'cancelled');assert.equal(studio.orchestrator.child,guideChild);assert.equal(studio.llama.child,coderChild);
+  const message=studio.sessions.find(session=>session.id===job.sessionId).messages.find(message=>message.jobId===job.id);
+  assert.equal(message.content,'Useful partial text');assert.equal(events.includes('unload:coder'),false);
+  studio.orchestrator.generate=generate;
+  const next=await studio.enqueue({kind:'chat',modelId:'guide',prompt:'A new request'});await settled(studio,next.id);
+  assert.equal(next.status,'completed');assert.equal(studio.orchestrator.child,guideChild);assert.equal(studio.llama.has('guide'),false);
+});
+
+test('targeted unload removes main-model specialist or pipeline copies while protecting the resident guide', async t => {
+  const {studio,makeEngine}=await fixture(t),model=studio.registry.models.find(model=>model.id==='guide');
+  const guideChild=studio.orchestrator.child;
+  await studio.llama.load(model,studio.registry.runtimes.chat,studio.lifecycle.signal,()=>{},4096);
+  studio.llama.pin(model.id);
+  assert.equal(studio.snapshot().loadedModels.filter(row=>row.modelId==='guide').length,2);
+  await studio.unloadModel('guide');
+  assert.equal(studio.llama.has('guide'),false);assert.equal(studio.orchestrator.child,guideChild);
+  await assert.rejects(studio.unloadModel('guide'),/guide stays loaded/);
+  studio.pipelineAgent=makeEngine();await studio.pipelineAgent.load(model,studio.registry.runtimes.chat,studio.lifecycle.signal,()=>{},4096,true);
+  await studio.unloadModel('guide');assert.equal(studio.pipelineAgent.modelId,null);assert.equal(studio.orchestrator.child,guideChild);
+  await studio.orchestrator.unload();
+  await studio.llama.load(model,studio.registry.runtimes.chat,studio.lifecycle.signal,()=>{},4096);
+  studio.llama.pin(model.id);
+  await studio.unloadModel('guide');assert.deepEqual(ids(studio),[]);
+});
+
+test('Chat and Code setup do not pin models across switches; explicit manual Load still retains them', async t => {
+  t.mock.method(globalThis,'fetch',async()=>assert.fail('Setup fixture must not download or contact an API'));
+  for(const mode of ['chat','code']){
+    const {studio,dir,events}=await fixture(t);
+    const runtimeDir=path.join(dir,'runtimes',`${process.platform}-${process.arch}`,'chat','cpu');
+    await fs.mkdir(runtimeDir,{recursive:true});await fs.writeFile(path.join(runtimeDir,'llama-server'+(process.platform==='win32'?'.exe':'')),'fixture');
+    studio.catalog.find(entry=>entry.id==='coder').kind='chat';
+    const downloads=[];studio.downloads.start=async catalogId=>downloads.push({catalogId,status:'completed'});studio.downloads.snapshot=()=>downloads;
+    studio.refreshDownloadedModels=async()=>{};
+    await studio.setupGuide({catalogId:'coder',mode});await studio.setupPromise;
+    assert.equal(studio.localSetup.status,'ready',studio.localSetup.error);assert.equal(studio.config.mainAgentModelId,'guide');
+    assert.equal(studio.llama.has('coder'),true);assert.equal(studio.llama.isPinned('coder'),false);
+    await studio.loadChat(studio.registry.models.find(model=>model.id==='writer'),studio.lifecycle.signal,()=>{});
+    assert.equal(studio.llama.has('coder'),false);assert.ok(events.includes('unload:coder'));
+    await studio.loadModel('writer');assert.equal(studio.llama.isPinned('writer'),true);
+  }
+});
+
+test('Chat and Code setup for the main model use one guide process in both resident and cold cases',async t=>{
+  t.mock.method(globalThis,'fetch',async()=>assert.fail('Setup fixture must not contact the network'));
+  for(const mode of ['chat','code'])for(const cold of [false,true]){
+    const {studio,dir,events,memory}=await fixture(t);
+    const runtimeDir=path.join(dir,'runtimes',`${process.platform}-${process.arch}`,'chat','cpu');
+    await fs.mkdir(runtimeDir,{recursive:true});await fs.writeFile(path.join(runtimeDir,'llama-server'+(process.platform==='win32'?'.exe':'')),'fixture');
+    studio.catalog.find(entry=>entry.id==='guide').kind='chat';
+    const downloads=[];studio.downloads.start=async catalogId=>downloads.push({catalogId,status:'completed'});studio.downloads.snapshot=()=>downloads;
+    studio.refreshDownloadedModels=async()=>{};
+    await studio.warmGuide();
+    if(cold)await studio.orchestrator.unload();
+    else{studio.catalog.find(entry=>entry.id==='guide').memoryGB=4.5;memory.budgetBytes=2.5*GiB;}
+    const child=studio.orchestrator.child,loads=events.filter(event=>event==='load:guide').length;
+    await studio.setupGuide({catalogId:'guide',mode});await studio.setupPromise;
+    assert.equal(studio.localSetup.status,'ready',studio.localSetup.error);assert.equal(studio.localSetup.mode,mode);
+    assert.equal(studio.config.mainAgentModelId,'guide');assert.equal(studio.orchestrator.modelId,'guide');
+    assert.equal(studio.llama.has('guide'),false);assert.deepEqual(ids(studio),['guide']);
+    assert.equal(events.filter(event=>event==='load:guide').length,loads+(cold?1:0));
+    if(!cold)assert.equal(studio.orchestrator.child,child);
+    assert.equal(studio.snapshot().loadedModels[0].role,'guide');
+  }
 });
 
 test('pipeline automatic cleanup preserves manual preloads while releasing its temporary specialist', async t => {

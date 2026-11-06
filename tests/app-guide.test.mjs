@@ -115,7 +115,7 @@ test('CLI help retrieves terminal-only local setup and all three cloud provider 
   assert.match(guide,/Chat\/Code keep the main agent; \/agent N changes it/);
   assert.match(guide,/larger Qwen3 and Qwen2\.5 Coder models/);
   assert.match(guide,/Suggested models use fresh memory estimates; no speed\/load guarantee/);
-  assert.match(guide,/Review size\/memory\/destination; Enter confirms setup/);
+  assert.match(guide,/Review size\/memory\/location; Enter confirms/);
   assert.match(guide,/No download starts before review confirmation/);assert.match(guide,/No fallback to a smaller model/);
   assert.match(guide,/verification and loading progress/);
   assert.match(guide,/saved request needs a separate Enter/);
@@ -142,10 +142,25 @@ test('Mac terminal scrolling help explains Control shortcuts and keeps the compl
  assert.match(guide,/Mac uses Control, not Command/);
  assert.match(guide,/PageUp\/Down and forwarded Option\/Alt\+Up\/Down also page/);
  assert.match(guide,/Earlier chat stays anchored as tokens stream; a line indicator shows position/);
- assert.match(guide,/Plain arrows edit chat drafts or move through guides, reviews and menus/);
+ assert.match(guide,/Chat Up\/Down recall current-session user requests and run-local commands without sending; Enter runs/);
+ assert.match(guide,/Down past newest restores your draft/);
+ assert.match(guide,/Multiline drafts keep line editing until a boundary, then recall whole entries/);
+ assert.match(guide,/No new disk history/);assert.match(guide,/Menus\/reviews keep arrow navigation/);
  assert.match(guide,/user-operated terminal commands, not chat tools/);
  assert.match(guide,/"installedModels":10000/);assert.match(guide,/"savedPipelines":10000/);
  assert.match(guide,/"availableKinds":\["chat","image","video","upscale","transcribe"\]/);
+ assert.ok(guide.length<=APP_GUIDE_MAX_CHARS);
+});
+
+test('CLI recall help distinguishes draft history from output scrolling and never promises automatic execution',()=>{
+ const guide=buildAppGuide({request:'How do I rerun earlier commands using Up and Down in the TIM CLI?'});
+ assert.deepEqual(appGuideTopics('How do I rerun earlier commands using Up and Down in the TIM CLI?'),['terminal']);
+ assert.match(guide,/current-session user requests and run-local commands without sending; Enter runs/);
+ assert.match(guide,/Down past newest restores your draft/);
+ assert.match(guide,/Multiline drafts keep line editing until a boundary, then recall whole entries/);
+ assert.match(guide,/No new disk history/);
+ assert.match(guide,/Ctrl\+P\/Ctrl\+N page up\/down/);assert.match(guide,/Ctrl\+L returns to latest text and live scrolling/);
+ assert.match(guide,/Ctrl\+J inserts a newline/);assert.match(guide,/Menus\/reviews keep arrow navigation/);
  assert.ok(guide.length<=APP_GUIDE_MAX_CHARS);
 });
 

@@ -40,11 +40,19 @@ An installed selected model can be reused, including repair of a missing chat en
 
 Enter sends (Ctrl+S is an alias); Ctrl+J inserts a newline; Esc cancels; Ctrl+Q quits. `/help`, `/setup`, `/providers`, `/models`, `/model N`, `/agent N`, `/sessions` and `/tools` expose controls. `NO_COLOR=1` disables color; `TIM_ASCII=1` selects ASCII borders. The enlarged hero subtitle uses bold, tracked terminal cells, not independent font scaling.
 
-To review a long reply, press **Ctrl+P** for the previous page and **Ctrl+N** for the next page. **Ctrl+L** jumps to the latest text and resumes following the live reply. While you read earlier chat, the visible text stays in place as more tokens arrive; the line-position indicator shows where you are. These shortcuts also page through provider guides, reviews and model menus. On Mac, use the **Control** key, not Command. PageUp/PageDown still work; Option/Alt+Up/Down work when your terminal forwards modified arrows. On Mac keyboards, Fn+Up/Down may also send PageUp/PageDown. Plain Up/Down retain draft editing in chat, move one line through guides/reviews, and select rows in model menus.
+In the main command box, **Up** recalls an older request or command and **Down** recalls a newer one. Recall fills the draft without sending it: review or edit it, then press **Enter** to run it again. Down past the newest entry restores the draft you were writing. With line breaks in a draft, plain Up/Down first moves between its lines; history begins at the first/last line. Once browsing history, the arrows move between whole entries, including multiline entries. History uses user messages from the current session and submitted slash commands from this CLI run. Assistant/system text is excluded, and TIM adds no separate history file; slash-command recall is not retained across restarts.
+
+To review a long reply, press **Ctrl+P** for the previous page and **Ctrl+N** for the next page. **Ctrl+L** jumps to the latest text and resumes following the live reply. While you read earlier chat, the visible text stays in place as more tokens arrive; the line-position indicator shows where you are. These shortcuts also page through provider guides, reviews and model menus. On Mac, use the **Control** key, not Command. PageUp/PageDown still work; Option/Alt+Up/Down work when your terminal forwards modified arrows. On Mac keyboards, Fn+Up/Down may also send PageUp/PageDown. Plain Up/Down move one line through guides/reviews and select rows in model menus.
 
 Two-finger trackpad scrolling and the mouse wheel scroll TIM's content when the terminal forwards mouse reports. Full-screen TIM enables reporting by default. In **Apple Terminal**, check **View → Allow Mouse Reporting**; the terminal must allow reporting as well as TIM requesting it. See [Apple's mouse-reporting instructions](https://support.apple.com/guide/terminal/turn-on-mouse-reporting-trmlc69728a5/mac). In **iTerm2**, enable **Profiles → Terminal → Enable mouse reporting** and **Report mouse wheel events**. See [iTerm2's terminal profile settings](https://iterm2.com/documentation-preferences-profiles-terminal.html).
 
 TIM follows the scroll direction your terminal reports, respecting macOS natural scrolling without adding an inversion. To use the terminal's own text selection and scrollback controls instead, launch **`tim --no-mouse`**. Ctrl+P/Ctrl+N/Ctrl+L remain available with mouse reporting disabled.
+
+### Model memory and unloading
+
+Enter `/memory` to refresh host RAM and list the model processes owned by the current TIM backend. It shows total and available RAM, the safety buffer, the resulting model budget, and each process's role, PID, measured resident RAM (RSS), and pin status. When RSS cannot be measured, the report labels any available estimate. Catalog RAM estimates describe requirements; they are not measurements of current usage. Process RSS does not represent the full unified/GPU memory footprint.
+
+Use `/unload` or `/unload idle` to release idle non-guide models. To unload a particular model's non-guide processes, run `/memory`, then `/unload N` using a row number from that report, rather than the numbers in `/models`. TIM verifies the displayed process identity before unloading; if processes changed, run `/memory` again. The guide stays resident. Unloading requires current work to finish or be cancelled, keeps downloaded files and selected defaults, and allows a later task to load the model again.
 
 ### Response length and context
 
@@ -341,7 +349,10 @@ new text streams in; the line indicator tracks the visible range. These page
 shortcuts also work in model menus, guides and reviews. Mac users hold Control,
 not Command. PageUp/PageDown and terminal-forwarded Option/Alt+Up/Down are
 alternatives; Fn+Up/Down may send page keys on a Mac keyboard. Plain arrows
-continue editing the chat draft or moving through the active menu/review.
+move between lines in a chat draft until its first/last line, then recall
+older/newer requests or commands. While browsing history they recall whole
+entries. Down past newest restores the unsent draft; Enter separately runs
+the recalled text. Menus and reviews keep their normal arrow navigation.
 Two-finger trackpad or wheel scrolling also works when the terminal forwards
 mouse reports; full-screen TIM requests them by default. `tim --no-mouse`
 leaves text selection and scrollback gestures with the terminal. Scroll

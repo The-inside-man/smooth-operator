@@ -105,6 +105,23 @@ test('an oversized current request fails clearly without silent truncation or bl
   assert.equal(completions.length, 1);
 });
 
+test('ordinary guide Chat uses the resident engine native context and forwards context usage',async t=>{
+  const completions=localEngine(t),studio=await studioFixture(t);
+  studio.config.context=8192;
+  studio.orchestrator.modelId='guide';studio.orchestrator.contextTokens=4096;
+  studio.llama.load=async()=>assert.fail('The guide must not be loaded into a specialist process');
+  studio.llama.generate=async()=>assert.fail('The guide must generate through its resident engine');
+  const session=await studio.newSession();
+  session.messages.push({role:'user',content:'Old topic '.repeat(3000)},{role:'assistant',content:'Old reply '.repeat(3000),status:'completed'});
+  const job=await studio.enqueue({sessionId:session.id,kind:'code',modelId:'guide',prompt:'Preserve this newest request'});
+  const message=await settled(studio,job);
+  assert.equal(job.status,'completed',job.phase);assert.equal(message.content,'console.log("done");');
+  assert.equal(message.contextUsage.contextTokens,4096);assert.equal(message.contextUsage.removedMessages,2);
+  assert.deepEqual(completions[0].messages.map(message=>message.role),['system','user']);
+  assert.equal(completions[0].messages[1].content,'Preserve this newest request');
+  assert.equal(studio.config.context,8192);assert.equal(studio.orchestrator.modelId,'guide');
+});
+
 test('agent synthesis preserves the current tool-call pair after removing older conversation history', async t => {
   const call = { id: 'call-code', type: 'function', function: { name: 'run_chat', arguments: JSON.stringify({ modelId: 'coder', prompt: 'Write the requested function.' }) } };
   const completions = localEngine(t, (_body, number) => number === 1 ? { content: null, tool_calls: [call] } : { content: 'The specialist returned its code.' });

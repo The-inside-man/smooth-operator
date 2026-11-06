@@ -45,6 +45,21 @@ test('an existing ready model is reused without requesting a download or changin
  assert.deepEqual(client.calls.map(call=>call.route),['state','rescan','state']);
 });
 
+test('Chat and Code setup accept their selected model from a real guide-owned process',async()=>{
+ for(const mode of ['chat','code']){
+  const modelId=ready().models[0].id,catalogId=ready().models[0].catalogId;
+  const snapshot={...ready(),localSetup:{catalogId,mode,status:'ready',explicit:true},loadedModels:[{modelId,role:'guide',pid:123}]};
+  assert.equal(localSetupStatus(snapshot,{catalogId,mode}).ready,true);
+  assert.equal(localSetupStatus({...snapshot,loadedModels:[]},{catalogId,mode}).ready,true,'running guide metadata is a supported fallback');
+  for(const orchestrator of [{modelId,status:'ready',loaded:false},{modelId,status:'loading',loaded:false},{modelId,status:'running',loaded:false},{modelId,status:'error',error:'Load failed'},{modelId:'another-model',status:'running',loaded:true}]){
+   assert.equal(localSetupStatus({...snapshot,loadedModels:[],orchestrator},{catalogId,mode}).ready,false,'indexed or failed guide metadata must not count as resident');
+  }
+  const client=fixture([snapshot],{before:ready()});
+  const result=await startLocalSetup(client,{catalogId,mode,pollMs:1});
+  assert.deepEqual(result,snapshot);assert.deepEqual(client.calls.find(call=>call.route==='setup').body,{catalogId,mode,installRuntime:true});
+ }
+});
+
 test('configured installed model requests only runtime repair and retains its selection',async()=>{
  const before={...ready(),models:[{...ready().models[0],available:false}],engines:{},runtimeSetup:{status:'idle'},orchestrator:{status:'needs-runtime',error:'Chat engine required'}};
  const client=fixture([ready()],{before});await startLocalSetup(client,{pollMs:1});
