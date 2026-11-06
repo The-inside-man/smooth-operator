@@ -1,3 +1,4 @@
+import './terminal-env.mjs';
 import {smallHood,microHood} from '../cli/layout.mjs';
 import test from 'node:test';import assert from 'node:assert/strict';import {shimmerFrame,shimmerRuns,startShimmer,SHIMMER_FRAMES,SHIMMER_INTERVAL} from '../cli/animation.mjs';import {hood,compactHood,portraitForLayout} from '../cli/art.mjs';import {layout} from '../cli/layout.mjs';import {silentPlan,rollbackPlan} from '../cli/silent-plan.mjs';
 // Exercise the color portrait rather than the test runner's monochrome fallback.

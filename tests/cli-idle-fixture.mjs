@@ -1,3 +1,4 @@
+import './terminal-env.mjs';
 // Exercise the real launcher in a synthetic TTY without a model or backend.
 // Advance only the app's idle timers; React/Ink still mount and render normally.
 import {setImmediate as turn, setTimeout as delay} from 'node:timers/promises';

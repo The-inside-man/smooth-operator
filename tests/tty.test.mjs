@@ -18,11 +18,12 @@ test('render error restores terminal before reporting failure',async()=>{
  assert.ok(output.includes(mouseEnable));assert.ok(output.includes(mouseDisable));
 });
 
-for(const noMouse of [false,true])test(`synthetic terminal SIGTERM restores input and ${noMouse?'leaves mouse reporting disabled':'turns mouse reporting off'}`,async()=>{
- const child=spawn(process.execPath,[fileURLToPath(new URL('./tty-fixture.mjs',import.meta.url))],{stdio:['pipe','pipe','pipe'],env:{...process.env,TIM_TEST_ARGS:JSON.stringify(noMouse?['--no-mouse']:[])}});
+for(const dispatch of ['os','handler'])for(const noMouse of [false,true])test(`synthetic terminal SIGTERM ${dispatch==='os'?'OS signal':'handler dispatch'} restores input and ${noMouse?'leaves mouse reporting disabled':'turns mouse reporting off'}`,{skip:dispatch==='os'&&process.platform==='win32'?'Windows OS termination does not run JavaScript signal handlers':false},async()=>{
+ const child=spawn(process.execPath,[fileURLToPath(new URL('./tty-fixture.mjs',import.meta.url))],{stdio:dispatch==='handler'?['pipe','pipe','pipe','ipc']:['pipe','pipe','pipe'],env:{...process.env,TIM_TEST_ARGS:JSON.stringify(noMouse?['--no-mouse']:[])}});
  let output='',error='',sent=false;const timeout=setTimeout(()=>child.kill('SIGKILL'),5000);
- child.stdout.on('data',chunk=>{output+=chunk;if(!sent&&output.includes('COMMAND')){sent=true;child.kill('SIGTERM');}});child.stderr.on('data',chunk=>error+=chunk);
+ child.stdout.on('data',chunk=>{output+=chunk;if(!sent&&output.includes('COMMAND')){sent=true;if(dispatch==='handler')child.send({type:'dispatch-sigterm'});else child.kill('SIGTERM');}});child.stderr.on('data',chunk=>error+=chunk);
  const code=await new Promise(resolve=>child.on('close',resolve));clearTimeout(timeout);assert.equal(code,0,error);
+ assert.equal(sent,true,'the fixture must reach the UI before SIGTERM');
  assert.ok(output.includes('\x1b[?1049l'));assert.match(error,/RAW:false/);
  assert.equal(output.includes(mouseEnable),!noMouse);assert.equal(output.includes(mouseDisable),!noMouse);
 });

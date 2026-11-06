@@ -1,3 +1,5 @@
+import './terminal-env.mjs';
+import {terminalAct} from './terminal-act.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import React from 'react';
@@ -38,11 +40,11 @@ async function mount({state=initial(),settingsFailure=false,stateFailure=false,o
   if(route==='jobs')throw new Error('Settings commands must not start inference');
   throw new Error('Unexpected fixture route: '+route);
  }};
- const ui=render(React.createElement(App,{client,initial:current,animation:false,onQuit:()=>{}}),{stdin,stdout,stderr:stdout,exitOnCtrlC:false,patchConsole:false});
+ let ui;await terminalAct(()=>{ui=render(React.createElement(App,{client,initial:current,animation:false,onQuit:()=>{}}),{stdin,stdout,stderr:stdout,exitOnCtrlC:false,patchConsole:false});});
  const exited=ui.waitUntilExit();await delay(75);
  const frame=()=>{const value=clean(output);return value.slice(Math.max(0,value.lastIndexOf('TIM / STUDIO')));};
- const key=async value=>{stdin.write(value);await delay(65);return frame();};
- return {calls,get state(){return current;},get frame(){return frame();},key,async command(value){await key('\x15');await key(value);return key('\r');},async settle(){await delay(80);return frame();},async close(){ui.unmount();await exited;ui.cleanup();client.controller.abort();stdin.destroy();stdout.destroy();}};
+ const key=async value=>{await terminalAct(()=>stdin.write(value));await delay(65);return frame();};
+ return {calls,get state(){return current;},get frame(){return frame();},key,async command(value){await key('\x15');await key(value);return key('\r');},async settle(){await terminalAct(()=>delay(80));return frame();},async close(){try{await terminalAct(()=>ui.unmount());await exited;}finally{ui.cleanup();client.controller.abort();stdin.destroy();stdout.destroy();}}};
 }
 
 test('no-argument commands show current response/context settings and help without API calls',async()=>{

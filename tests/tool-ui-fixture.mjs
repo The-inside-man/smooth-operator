@@ -1,3 +1,4 @@
+import './terminal-env.mjs';
 import React from 'react';
 import {render} from 'ink';
 import {ToolScreen} from '../cli/tool-screen.mjs';

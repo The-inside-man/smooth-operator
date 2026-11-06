@@ -1,3 +1,4 @@
+import './terminal-env.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import React from 'react';

@@ -1,4 +1,5 @@
-process.env.TERM='xterm-256color'; delete process.env.CI;
+import './terminal-env.mjs';
+process.env.TERM='xterm-256color';
 // Test-only synthetic terminal. No inference or application state is touched.
 Object.defineProperty(process.stdin,'isTTY',{value:true});
 Object.defineProperty(process.stdout,'isTTY',{value:true});
@@ -16,5 +17,9 @@ if(process.env.TIM_TEST_ERROR==='1'){
  const {demoState}=await import('../cli/core.mjs');demoState.sessions[0].messages='invalid test shape';
 }
 setTimeout(()=>{process.stdout.columns=100;process.stdout.rows=24;process.stdout.emit('resize');},150).unref();
+// Portable handler coverage only: Windows OS termination never dispatches a
+// catchable SIGTERM. IPC lets tests exercise the registered JS cleanup handler.
+const dispatchSignal=message=>{if(message?.type==='dispatch-sigterm')process.emit('SIGTERM');};
+if(process.send)process.on('message',dispatchSignal);
 try{await import('../cli/index.mjs');}
-finally{await rm(dataDir,{recursive:true,force:true});}
+finally{process.off('message',dispatchSignal);if(process.connected)process.disconnect();await rm(dataDir,{recursive:true,force:true});}

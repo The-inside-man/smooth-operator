@@ -1,3 +1,5 @@
+import './terminal-env.mjs';
+import {terminalAct} from './terminal-act.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import React from 'react';
@@ -14,7 +16,7 @@ const models=[
  {id:'beta',name:'Beta available',kind:'chat',available:true},
 ];
 
-async function mount({modelList=models,mainAgentModelId='',initialRequest='',selection={provider:'local'},failFirstSave=false,rescanModels,catalog=[],memory,setupResult}={}) {
+async function mount({modelList=models,mainAgentModelId='',initialRequest='',selection={provider:'local'},failFirstSave=false,rescanModels,catalog=[],memory,setupResult,readyCheck}={}) {
  const state=structuredClone({...demoState,models:modelList,config:{mainAgentModelId},catalog,memory}),calls=[],selections=[];
  const stdin=new PassThrough();stdin.isTTY=true;stdin.ref=()=>stdin;stdin.unref=()=>stdin;stdin.setRawMode=()=>stdin;
  let output='',saves=0,quits=0;
@@ -42,17 +44,19 @@ async function mount({modelList=models,mainAgentModelId='',initialRequest='',sel
    throw new Error('Unexpected fixture route: '+route);
   },
  };
- const ui=render(React.createElement(TerminalBoundary,null,React.createElement(App,{client,initial:structuredClone(state),initialRequest,animation:false,onQuit:()=>{quits++;},onSelection:async value=>selections.push({...value})})),{stdin,stdout,stderr:stdout,exitOnCtrlC:false,patchConsole:false});
+ let ui;await terminalAct(()=>{ui=render(React.createElement(TerminalBoundary,null,React.createElement(App,{client,initial:structuredClone(state),initialRequest,animation:false,onQuit:()=>{quits++;},onSelection:async value=>selections.push({...value})})),{stdin,stdout,stderr:stdout,exitOnCtrlC:false,patchConsole:false});});
  const exited=ui.waitUntilExit();
+ const close=async()=>{try{await terminalAct(()=>ui.unmount());await exited;}finally{ui.cleanup();client.controller.abort();stdin.destroy();stdout.destroy();}};
  const wait=async(predicate,label)=>{
   for(let attempt=0;attempt<120;attempt++){if(predicate())return;await delay(25);}
   assert.fail(label+'\n'+clean(output).slice(-5500));
  };
- await wait(()=>output.length>0,'initial render');await delay(80);
+ try{await wait(()=>readyCheck?readyCheck():output.length>0,'initial render');await delay(80);}
+ catch(error){await close();throw error;}
  return {calls,selections,state,client,get output(){return clean(output);},get quits(){return quits;},
-  async key(value){const offset=output.length;stdin.write(value);await delay(90);return clean(output.slice(offset));},
+  async key(value){const offset=output.length;await terminalAct(()=>stdin.write(value));await delay(90);return clean(output.slice(offset));},
   wait,
-  async close(){ui.unmount();await exited;ui.cleanup();client.controller.abort();stdin.destroy();stdout.destroy();},
+  close,
  };
 }
 
@@ -209,4 +213,10 @@ for(const command of ['model','agent'])test(`/${command} uses the displayed comb
   const jobs=app.calls.filter(call=>call.route==='jobs');assert.equal(jobs.length,1);assert.equal(jobs[0].body.modelId,selectedModel.id);
   assert.equal(jobs[0].body.kind,selectedMode);
  }finally{await app.close();}
+});
+
+test('failed initial model screen readiness cleans up its renderer',async()=>{
+ const listeners=process.listenerCount('beforeExit');
+ await assert.rejects(mount({readyCheck:()=>{throw new Error('FIXTURE_READINESS_FAILURE');}}),/FIXTURE_READINESS_FAILURE/);
+ assert.equal(process.listenerCount('beforeExit'),listeners);
 });

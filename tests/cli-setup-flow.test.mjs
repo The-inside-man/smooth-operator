@@ -1,3 +1,5 @@
+import './terminal-env.mjs';
+import {terminalAct} from './terminal-act.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import React from 'react';
@@ -18,7 +20,7 @@ const ready=(catalogId=targetId)=>{
 
 // Exercises real App routing/input with an in-memory backend. No API key,
 // download, model inference or filesystem configuration is used.
-async function mount({initialRequest='',startSetup=false,selection={provider:'local'},holdSetup=false,setupError,initialState=empty()}={}){
+async function mount({initialRequest='',startSetup=false,selection={provider:'local'},holdSetup=false,setupError,initialState=empty(),readyCheck}={}){
  let state=structuredClone(initialState),watchState,releaseSetup,output='',quits=0;
  const calls=[],selections=[],stdin=new PassThrough();
  stdin.isTTY=true;stdin.ref=()=>stdin;stdin.unref=()=>stdin;stdin.setRawMode=()=>stdin;
@@ -43,19 +45,21 @@ async function mount({initialRequest='',startSetup=false,selection={provider:'lo
    throw new Error('Unexpected fixture route: '+route);
   },
  };
- const ui=render(React.createElement(TerminalBoundary,null,React.createElement(App,{client,initial:structuredClone(state),initialRequest,startSetup,animation:false,onQuit:()=>{quits++;},onSelection:async value=>selections.push(structuredClone(value))})),{stdin,stdout,stderr:stdout,exitOnCtrlC:false,patchConsole:false});
+ let ui;await terminalAct(()=>{ui=render(React.createElement(TerminalBoundary,null,React.createElement(App,{client,initial:structuredClone(state),initialRequest,startSetup,animation:false,onQuit:()=>{quits++;},onSelection:async value=>selections.push(structuredClone(value))})),{stdin,stdout,stderr:stdout,exitOnCtrlC:false,patchConsole:false});});
  const exited=ui.waitUntilExit();
+ const close=async()=>{try{await terminalAct(()=>ui.unmount());await exited;}finally{ui.cleanup();client.controller.abort();stdin.destroy();stdout.destroy();}};
  const wait=async(predicate,label)=>{
   for(let attempt=0;attempt<180;attempt++){if(predicate())return;await delay(25);}
   assert.fail(label+'\n'+clean(output).slice(-6000));
  };
- await wait(()=>output.length>0&&typeof watchState==='function','initial App render and event watcher');await delay(80);
+ try{await wait(()=>readyCheck?readyCheck():output.length>0&&typeof watchState==='function','initial App render and event watcher');await delay(80);}
+ catch(error){await close();throw error;}
  return {calls,selections,client,get output(){return clean(output);},get quits(){return quits;},
-  async key(value){const offset=output.length;stdin.write(value);await delay(100);return clean(output.slice(offset));},
-  async push(snapshot){state=structuredClone(snapshot);watchState(structuredClone(state));await delay(90);},
+  async key(value){const offset=output.length;await terminalAct(()=>stdin.write(value));await delay(100);return clean(output.slice(offset));},
+  async push(snapshot){state=structuredClone(snapshot);await terminalAct(()=>watchState(structuredClone(state)));await delay(90);},
   finishSetupRequest(){assert.equal(typeof releaseSetup,'function','setup request must already be pending');releaseSetup();},
   wait,
-  async close(){ui.unmount();await exited;ui.cleanup();client.controller.abort();stdin.destroy();stdout.destroy();},
+  close,
  };
 }
 
@@ -187,4 +191,10 @@ for(const mode of ['chat','code'])test(`choosing a download in /models preserves
   const jobs=app.calls.filter(call=>call.route==='jobs');assert.equal(jobs.length,1);assert.equal(jobs[0].body.modelId,'catalog:'+targetId);
   assert.equal(jobs[0].body.kind,mode);assert.ok(jobs[0].body.prompt.includes(mode==='chat'?JSON.stringify(request):request));
  }finally{await app.close();}
+});
+
+test('failed initial setup screen readiness cleans up its renderer',async()=>{
+ const listeners=process.listenerCount('beforeExit');
+ await assert.rejects(mount({readyCheck:()=>{throw new Error('FIXTURE_READINESS_FAILURE');}}),/FIXTURE_READINESS_FAILURE/);
+ assert.equal(process.listenerCount('beforeExit'),listeners);
 });
