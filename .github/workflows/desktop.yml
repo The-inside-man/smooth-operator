@@ -13,7 +13,7 @@ jobs:
           - os: windows-latest
             target: win-x64
             args: --win --x64
-          - os: macos-14
+          - os: macos-15
             target: mac-arm64
             args: --mac --arm64
           - os: macos-15-intel

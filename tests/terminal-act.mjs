@@ -11,7 +11,8 @@ export async function terminalAct(action){
   // A frame can be written before passive effects replace its input handler.
   // Flush work from previous async/backend updates before dispatching a key.
   await act(async()=>{await turn();});
-  await act(async()=>{await action();});
+  // Ink defers a bare Escape to setImmediate; flush it inside act as well.
+  await act(async()=>{await action();await turn();});
  }
  finally{
   if(previous===undefined)delete globalThis.IS_REACT_ACT_ENVIRONMENT;

@@ -65,7 +65,11 @@ test('slow startup and real Ink key sequences preserve editing, paste, Enter and
  await waitFor(()=>output.includes('COMMAND'),'CLI must render its composer before receiving keys');assert.match(output,/COMMAND/);
  const beforeResize=output.length;child.send({type:'resize-terminal'});
  await waitFor(()=>output.slice(beforeResize).includes('COMMAND'),'CLI must redraw its composer after terminal resize');
- for(const key of ['abc','\x7f','\b','界👩‍💻','\x1b[D','\x1b[3~','\x1b[H','Z','\x1b[F','\x1b[200~','\nline\r\nlast','\x1b[201~']){child.stdin.write(key);await delay(35);}
+ // A busy terminal can coalesce separate physical key writes into one read.
+ // Exercise that path deliberately instead of depending on 35 ms scheduling.
+ const editOffset=output.length;
+ child.stdin.write(['abc','\x7f','\b','界👩‍💻','\x1b[D','\x1b[3~','\x1b[H','Z','\x1b[F','\x1b[200~','\nline\r\nlast','\x1b[201~'].join(''));
+ await waitFor(()=>{const frame=output.slice(editOffset);return frame.includes('Za界')&&frame.includes('line')&&frame.includes('last');},'the coalesced keys must render the edited multiline draft');
  assert.equal(received,undefined,'paste must not submit');child.stdin.write('\r');await waitFor(()=>received!==undefined,'Enter must submit the edited request');assert.equal(received?.prompt,'Za界\nline\nlast',errors);child.stdin.write('\x11');await waitFor(()=>closed,'CLI must exit after Ctrl+Q');assert.equal(exitCode,0,errors);assert.match(output,/\x1b\[\?2004l/);assert.doesNotMatch(output.slice(output.lastIndexOf('\x1b[?1049l')),/\x1b\[(?:[0-9]*[JK]|H)/,'renderer cleanup must finish before restoring the original screen');
  }finally{child?.kill();stream?.end();server.closeAllConnections();await new Promise(r=>server.close(r));}
 });

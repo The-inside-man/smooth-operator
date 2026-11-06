@@ -17,6 +17,16 @@ export function useEditorInput(handler,options){
   if(paste.current!==null){paste.current+=value;return;}
   const report=mouse.current.read(value);
   if(report){if(report.wheel)handler('',{wheel:report.wheel});if(report.text)handler(report.text,{});return;}
+  // A slow terminal read can coalesce ordinary typing with physical Backspace.
+  // Ink keeps non-ESC runs together, so preserve these edits before sanitizing
+  // text. Keep CR/Ctrl+S in text chunks: an unbracketed paste must not submit.
+  if(!value.includes('\x1b')&&/[\x08\x7f]/.test(value)){
+   for(const part of value.split(/([\x08\x7f])/))if(part){
+    if(part==='\b'||part==='\x7f')handler('',{backspace:true});
+    else handler(part,{});
+   }
+   return;
+  }
   if(value==='\x7f'||value==='\x1b\x7f')key={...key,delete:false,backspace:true};
   if(value==='\n'){handler('j',{ctrl:true});return;}
   if(value==='\x1b\r'){handler('',{return:true,meta:true});return;}
