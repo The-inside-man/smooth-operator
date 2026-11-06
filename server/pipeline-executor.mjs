@@ -11,7 +11,7 @@ const textFile = /\.(txt|md|js|ts|py|json|csv|html|css)$/i;
 const imageFile = /\.(png|jpg|jpeg|webp)$/i;
 const supportedInput = /\.(txt|md|js|ts|py|json|csv|html|css|png|jpg|jpeg|webp|wav)$/i;
 const supportedOutput = /\.(txt|png|webm)$/i;
-const responseLimit = 64_000;
+const responseLimit = 16 * 1024 * 1024;
 const knownTypes = ['input', 'agent', 'chat', 'code', 'image', 'video', 'upscale', 'transcribe', 'load', 'unload'];
 const safeName = name => typeof name === 'string' && name.length > 0 && name.length <= 255 && name !== '.' && name !== '..' && !/[\\/\0]/.test(name) && path.basename(name) === name;
 const catalog = studio => Array.isArray(studio.catalog) ? studio.catalog : studio.catalog?.models || [];
@@ -56,12 +56,11 @@ export function validatePipelineModel(studio, node) {
 
 function stepConfig(studio, node) {
   const next = { ...studio.config, ...node.settings, systemPrompt: node.systemPrompt || studio.config.systemPrompt, enableThinking: false };
-  const ranges = { temperature: [0, 2, false], maxTokens: [1, 8192, true], context: [512, 32768, true], agentMaxSteps: [1, 8, true], agentTimeoutSeconds: [1, 1800, false] };
+  const ranges = { temperature: [0, 2, false], maxTokens: [0, 1048576, true], context: [512, 1048576, true], agentMaxSteps: [1, 8, true], agentTimeoutSeconds: [1, 1800, false] };
   for (const [key, [min, max, integer]] of Object.entries(ranges)) {
     const value = next[key];
     if (value !== undefined && (!Number.isFinite(value) || value < min || value > max || (integer && !Number.isInteger(value)))) throw new Error(`Invalid pipeline ${key}.`);
   }
-  if (next.maxTokens >= next.context) throw new Error('Response tokens must be smaller than the context window.');
   if (!['auto', 'keep', 'unload'].includes(node.memoryPolicy || 'auto')) throw new Error('Invalid model memory policy.');
   return next;
 }
@@ -186,7 +185,7 @@ export function createPipelineExecutor(studio) {
       validateMediaInput(node.type, model, inputs[0]?.file);
       if (node.type === 'load') {
         await studio.pipelineAgent?.unload();
-        if (model.id === guideId(studio)) await studio.loadOrchestrator(model, signal, update);
+        if (model.id === guideId(studio)) await studio.loadOrchestrator(model, signal, update, config.context);
         else {
           await releaseSpecialist(); assertMemory(studio, model);
           const facade = Object.assign(Object.create(studio), { config, sampleMemory: studio.sampleMemory?.bind(studio) });
@@ -211,7 +210,7 @@ export function createPipelineExecutor(studio) {
       };
       if (['chat', 'code'].includes(node.type)) {
         let engine = studio.llama;
-        if (model.id === guideId(studio)) { await studio.loadOrchestrator(model, signal, update); engine = studio.orchestrator; }
+        if (model.id === guideId(studio)) { await studio.loadOrchestrator(model, signal, update, config.context); engine = studio.orchestrator; }
         else await facade.loadChat(model, signal, update);
         signal.throwIfAborted(); update(node.type === 'code' ? 'Generating code' : 'Generating response');
         const prompt = await textPrompt(node.prompt, inputs);
@@ -258,7 +257,7 @@ export function createPipelineExecutor(studio) {
           };
         } else {
           facade.orchestrator = studio.orchestrator;
-          facade.loadOrchestrator = studio.loadOrchestrator.bind(studio);
+          facade.loadOrchestrator = (target,loadSignal,change) => studio.loadOrchestrator(target,loadSignal,change,config.context);
         }
         // runAgent exposes only attachment IDs. Stage verified files under fresh names
         // to support ancestor outputs without granting an arbitrary filesystem root.

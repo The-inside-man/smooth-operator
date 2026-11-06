@@ -54,9 +54,9 @@ export function contextLimitError({ promptTokens, contextTokens, responseTokens,
   const capacity = contextTokens ? `The loaded model has a ${format(contextTokens)}-token context.` : 'The request exceeds the loaded model’s context window.';
   const required = promptTokens ? ` This request needs ${format(promptTokens)} input tokens plus ${format(responseTokens)} response tokens.` : ` Leave room for ${format(responseTokens)} response tokens as well as your input.`;
   const needed = Math.max(contextTokens + 1, (promptTokens || 0) + responseTokens + 16);
-  const nextContext = contextTokens && needed <= 32768 ? 2 ** Math.ceil(Math.log2(needed)) : null;
+  const nextContext = contextTokens && needed <= 1048576 ? 2 ** Math.ceil(Math.log2(needed)) : null;
   const action = fixedContext
     ? 'The lightweight guide keeps a fixed context. Reduce Response tokens, send less input, or use Chat/Code with a specialist and a larger Context tokens setting.'
-    : nextContext ? `Increase Context tokens in Settings to ${format(nextContext)} and reload the model (this uses more memory), reduce Response tokens, or send less code/source.` : 'Reduce Response tokens or send less code/source.';
+    : nextContext ? `Increase Context tokens in Settings to ${format(nextContext)} or use /context ${nextContext} (this reloads the model and uses more memory), use /tokens auto to fit the response, or send less code/source.` : 'Use /tokens auto to fit the response or send less code/source.';
   return new Error(`${capacity}${required} ${action} Your latest request and source were kept intact.`);
 }

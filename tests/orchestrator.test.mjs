@@ -52,7 +52,7 @@ test('dedicated CPU orchestrator stays resident while media runs and is reused f
   assert.equal(messages.length, 2);
   assert.equal(JSON.parse(messages[1].at(-1).content).status, 'completed');
   assert.equal(message.content, 'The specialist returned a result.');
-  assert.equal(requests[0].maxTokens, 1024); assert.equal(requests[0].enableThinking, false);
+  assert.equal(requests[0].maxTokens, studio.config.maxTokens); assert.equal(requests[0].enableThinking, false);
 });
 
 test('text specialist uses the separate engine without replacing the orchestrator', async () => {

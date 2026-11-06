@@ -1,4 +1,29 @@
+## Unreleased - 2026-10-31
+
+## Unreleased — CLI usability, actions and opt-in adapters
+
+- Center responsive artwork, cap idle panels, fix cell-aware editing/Backspace, make Enter submit and keep multiline paste safe.
+- Add configured-model natural requests, read-only local port inspection, reviewed single-page image downloads and official prerequisite download plans.
+- Add opt-in local Windows dictation, optional nonactivating overlay and explicitly reviewed bounded Windows input adapter; native mic/input remains untested.
+- Add fail-closed Tor routing for built-in image fetches only; whole-host Silent Mode remains design/preflight with an explicit no-anonymity-guarantee warning.
+- Add local-package Windows PowerShell and macOS/Linux shell installers with user PATH setup, checksums, command collision checks, release rollback and owned uninstall.
+- Bundle installer scripts and package checksum with `npm run pack:cli`; require Node.js 24+ and never auto-elevate or configure provider credentials.
+- Validate isolated Windows/mock PATH and Git Bash flows; native macOS/Linux execution remains unverified.
+
+- Add explicit OpenAI/xAI Responses text streaming and strict-schema CLI planning, dynamic model discovery, provider boundaries and safe error reporting. No credentials are stored and no provider fallback is automatic.
+- Show observed phases, elapsed/last-activity time and conservative historical ETA ranges after sufficient comparable samples; separate UI clocks from backend/provider events. Add reconnect, reviewed retry and idempotent chat submissions.
+- Validate with mocked cloud HTTP/SSE, dummy keys and isolated local fixtures; live vendor/account behavior is not certified.
+
 # Changelog
+
+## Unreleased - TIM terminal workspace
+
+- Add the independently installable `tim` full-screen CLI, responsive faceless ASCII artwork, tracked subtitles and bright double-line borders.
+- Reuse the local session/model API through an owned loopback backend with automatic guide setup disabled; attaching to an existing backend preserves its ownership.
+- Add reviewed local utility/package-manager execution, metadata-verified model-assisted installation, bounded TCP/UDP listeners and offline TShark hex/ASCII packet views.
+- Add user-selected persistent toolbox storage, centralized recall before script proposals, versioned drafts, permission/source-bound approval, and locked atomic audit updates.
+- Document supported operations and limitations in [CLI.md](CLI.md). Initial implementation passed 61 fixture tests and an isolated Windows package install; integrated-main checks are reported in the draft PR. Real inference, target package installs and external/live capture are not part of this validation.
+
 
 ## Unreleased — 2026-10-26
 
@@ -27,3 +52,17 @@ These changes build on the 0.1.0 desktop alpha. No new release or version tag ha
 - Memory readings and model estimates aid planning; context size, other apps and GPU allocation affect actual capacity. Process RAM does not include dedicated GPU VRAM. Inference remains sequential even when several models are loaded.
 - New image recipes and download metadata were checked against publisher information and engine documentation; native inference for these bundles has not been validated here. A compatible image engine is still required. Identity preservation is best-effort, and individual model licenses apply, including Qwen Image 2.1's non-commercial research terms.
 - Code steps generate text. Agents still have no arbitrary filesystem access, shell execution or automated run/test/fix tools.
+
+### TIM CLI final usability and guarded workflow review
+
+- Require a 100-column/16-row interactive viewport; preserve mounted state through resize, pause hidden typing/approvals, retain cancel/quit.
+- Complete Enter-submit/grapheme editing, centered responsive art, model-directed local port/image actions and official prerequisite download offers.
+- Add opt-in voice/hood overlay, reviewed desktop plans and limited Tor fetch transport with explicit unsupported boundaries; Silent Mode remains preflight only.
+- Fix dependency version argument routing and desktop approval-time target changes; add command-level fixture tests and document live/native validation limits in CLI.md.
+
+### Semantic desktop and optional platform adapters
+
+- Add model-assisted observe/plan/review/act/verify workflow, semantic predicates, bounded recovery, per-step approval and exact cloud observation review.
+- Add Windows UIA Value/Invoke, optional macOS AX/Linux X11 AT-SPI source adapters and portable local sounddevice/Vosk capture. Missing dependencies and Wayland takeover fail explicitly; native validation is pending.
+- Add inactive per-OS Silent Mode and hash-bound rollback plans; no privileged executor or anonymity claim.
+- Add low-rate ASCII hoodie shading frames with no-animation/reduced-motion controls and fixed character geometry. See PLATFORM-SUPPORT.md for precise proof and gaps.

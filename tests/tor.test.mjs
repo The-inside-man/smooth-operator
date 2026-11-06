@@ -1,0 +1,26 @@
+import test from 'node:test';import assert from 'node:assert/strict';import net from 'node:net';import fs from 'node:fs/promises';import os from 'node:os';import path from 'node:path';import {torProxy,torSocket} from '../cli/tor.mjs';import {downloadImages} from '../cli/image-download.mjs';
+test('Tor SOCKS delegates DNS, pins resolved IP, routes redirects/assets and fails closed',async()=>{const requests=[],identities=[];const sockets=new Set();const server=net.createServer(socket=>{sockets.add(socket);socket.on('close',()=>sockets.delete(socket));let phase=0;socket.on('data',b=>{if(phase===0){assert.deepEqual([...b],[5,1,2]);socket.write(Buffer.from([5,2]));phase=1;return;}if(phase===1){assert.equal(b[0],1);identities.push(b.toString('hex'));socket.write(Buffer.from([1,0]));phase=2;return;}if(phase===2){const command=b[1],type=b[3],host=type===3?b.subarray(5,5+b[4]).toString():[...b.subarray(4,8)].join('.');requests.push({command,type,host});const ip=host==='internal.example'?[127,0,0,1]:[8,8,8,8];socket.write(Buffer.from([5,0,0,1,...ip,0,0]));phase=command===0xf0?4:3;return;}if(phase===3){const request=b.toString();const resource=request.split(' ')[1];if(resource==='/redirect'){socket.end('HTTP/1.1 302 Found\r\nLocation: http://internal.example/\r\nContent-Length: 0\r\n\r\n');return;}const image=resource==='/image',body=image?'PNG':'<img src="/image">';socket.end('HTTP/1.1 200 OK\r\nContent-Type: '+(image?'image/png':'text/html')+'\r\nContent-Length: '+Buffer.byteLength(body)+'\r\nConnection: close\r\n\r\n'+body);}});});await new Promise(r=>server.listen(0,'127.0.0.1',r));const proxy='127.0.0.1:'+server.address().port,root=await fs.mkdtemp(path.join(os.tmpdir(),'tim-tor-'));try{const r=await downloadImages({url:'http://public.example/',destination:path.join(root,'images'),transport:{mode:'tor',proxy}});assert.equal(r.saved.length,1,JSON.stringify(r));assert.equal(new Set(identities).size,1,'one operation shares isolation across DNS/page/assets');assert.equal(requests.filter(r=>r.command===0xf0&&r.host==='public.example').length,2);assert.ok(requests.filter(r=>r.command===1).every(r=>r.host==='8.8.8.8'));await assert.rejects(downloadImages({url:'http://public.example/redirect',destination:path.join(root,'redirect'),transport:{mode:'tor',proxy}}),/non-public/);assert.ok(new Set(identities).size>=2,'separate operations use separate isolation identities');const onion='a'.repeat(56)+'.onion',socket=await torSocket(onion,80,{proxy});socket.destroy();assert.ok(requests.some(r=>r.command===1&&r.type===3&&r.host===onion));assert.ok(!requests.some(r=>r.command===0xf0&&r.host===onion));const c=new AbortController();c.abort();await assert.rejects(torSocket('public.example',80,{proxy,signal:c.signal}));}finally{for(const s of sockets)s.destroy();await new Promise(r=>server.close(r));}});
+test('Tor proxy and URL validation never select a remote/system proxy',()=>{assert.deepEqual(torProxy(),{host:'127.0.0.1',port:9050});assert.throws(()=>torProxy('proxy.example:9050'));assert.throws(()=>torProxy('user:pass@127.0.0.1:9050'));});
+
+test('Tor isolation refuses no-auth downgrade and authentication failure without CONNECT',async()=>{
+ for(const refusal of ['method','auth']){let messages=0;const sockets=new Set(),server=net.createServer(socket=>{sockets.add(socket);socket.on('close',()=>sockets.delete(socket));socket.on('data',()=>{messages++;socket.write(Buffer.from(messages===1?(refusal==='method'?[5,0]:[5,2]):[1,1]));});});await new Promise(r=>server.listen(0,'127.0.0.1',r));
+ try{await assert.rejects(torSocket('public.example',443,{proxy:'127.0.0.1:'+server.address().port}),/isolation/);assert.equal(messages,refusal==='method'?1:2);}finally{for(const s of sockets)s.destroy();await new Promise(r=>server.close(r));}}
+});
+
+// This models SafeSocks' numeric address-map check, not a real Tor daemon.
+test('remote RESOLVE association and matching auth do not exempt pinned CONNECT from SafeSocks',async t=>{
+ const dns=(await import('node:dns')).default;
+ const requests=[],auth=[],resolved=new Map(),sockets=new Set();
+ const server=net.createServer(socket=>{sockets.add(socket);socket.on('close',()=>sockets.delete(socket));let phase=0;
+ socket.on('data',b=>{if(phase===0){socket.write(Buffer.from([5,2]));phase++;return;}
+ if(phase===1){auth.push(b.toString('hex'));socket.write(Buffer.from([1,0]));phase++;return;}
+ const command=b[1],type=b[3],host=type===3?b.subarray(5,5+b[4]).toString():[...b.subarray(4,8)].join('.');requests.push({command,type,host});
+ if(command===0xf0){resolved.set(host,'8.8.8.8');socket.end(Buffer.from([5,0,0,1,8,8,8,8,0,0]));}
+ else socket.end(Buffer.from([5,resolved.has(host)?0:2,0,1,0,0,0,0,0,0]));
+ });});await new Promise(r=>server.listen(0,'127.0.0.1',r));
+ t.mock.method(dns,'lookup',()=>{throw new Error('LOCAL DNS MUST NOT RUN');});
+ t.mock.method(dns.promises,'lookup',()=>{throw new Error('LOCAL DNS MUST NOT RUN');});
+ try{await assert.rejects(torSocket('public.example',443,{proxy:'127.0.0.1:'+server.address().port}),/SafeSocks.*No hostname retry/);
+ assert.deepEqual(requests,[{command:240,type:3,host:'public.example'},{command:1,type:1,host:'8.8.8.8'}]);assert.equal(auth.length,2);assert.equal(auth[0],auth[1]);
+ }finally{for(const socket of sockets)socket.destroy();await new Promise(r=>server.close(r));}
+});

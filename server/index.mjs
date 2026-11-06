@@ -1,3 +1,4 @@
+import {listCloudModels} from './cloud-provider.mjs';
 import http from 'node:http';
 import fs from 'node:fs/promises';
 import { createReadStream } from 'node:fs';
@@ -32,14 +33,15 @@ async function fileResponse(req, res, filename, download = false) {
   const stream = createReadStream(filename, { start, end });
   stream.on('error', () => res.destroy()); res.on('close', () => stream.destroy()); stream.pipe(res);
 }
-export async function startServer({ port = 4317, dataDir = process.env.TIM_DATA_DIR || path.join(root, 'data'), staticDir = path.join(root, 'dist'), autoSetup = process.env.TIM_AUTO_SETUP !== '0' } = {}) {
-  const studio = new Studio(dataDir); studio.on('error', error => console.error('Studio:', error.message)); await studio.init();
+export async function startServer({ port = 4317, dataDir = process.env.TIM_DATA_DIR || path.join(root, 'data'), staticDir = path.join(root, 'dist'), autoSetup = process.env.TIM_AUTO_SETUP !== '0', telemetry = true, libraryRoot, authToken, management } = {}) {
+  const studio = new Studio(dataDir); studio.on('error', error => console.error('Studio:', error.message)); await studio.init({ telemetry, libraryRoot });
   const clients = new Set();
   const server = http.createServer(async (req, res) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     const actualPort = server.address().port;
     const hosts = [`127.0.0.1:${actualPort}`, `localhost:${actualPort}`];
     if (!hosts.includes(req.headers.host)) return json(res, { error: 'Local requests only.' }, 403);
+    if (authToken && req.headers.authorization !== 'Bearer '+authToken) return json(res,{error:'Backend authentication required.'},401);
     const url = new URL(req.url, `http://${req.headers.host}`);
     const origin = req.headers.origin;
     const allowed = [`http://127.0.0.1:${actualPort}`, `http://localhost:${actualPort}`];
@@ -47,6 +49,10 @@ export async function startServer({ port = 4317, dataDir = process.env.TIM_DATA_
     if (origin && !allowed.includes(origin)) return json(res, { error: 'Invalid origin.' }, 403);
     if (!['GET', 'HEAD'].includes(req.method) && req.headers['x-tim-request'] !== '1') return json(res, { error: 'Invalid request.' }, 403);
     try {
+      if (management && await management(req,res,studio)) return;
+      if (url.pathname === '/api/provider-models' && req.method === 'POST') return json(res, {models:await listCloudModels((await body(req)).provider)});
+      if (url.pathname === '/api/setup/options' && req.method === 'GET') { await studio.sampleMemory(); return json(res, studio.snapshot()); }
+      if (url.pathname === '/api/timing/reset' && req.method === 'POST') { await studio.resetTimings(); return json(res,{ok:true}); }
       if (url.pathname === '/api/state') return json(res, studio.snapshot());
       if (url.pathname === '/api/events' && req.method === 'GET') {
         res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
@@ -59,7 +65,7 @@ export async function startServer({ port = 4317, dataDir = process.env.TIM_DATA_
       if (url.pathname === '/api/cancel' && req.method === 'POST') { await studio.cancel((await body(req)).id); return json(res, { ok: true }); }
       if (url.pathname === '/api/settings' && req.method === 'POST') { await studio.updateSettings(await body(req)); return json(res, { ok: true }); }
       if (url.pathname === '/api/rescan' && req.method === 'POST') { await studio.rescan(); return json(res, { ok: true }); }
-      if (url.pathname === '/api/setup' && req.method === 'POST') { await studio.setupGuide(); return json(res, { ok: true }); }
+      if (url.pathname === '/api/setup' && req.method === 'POST') { const options=await body(req); await studio.setupGuide({installRuntime:options.installRuntime===true,background:true,...(options.catalogId===undefined?{}:{catalogId:options.catalogId}),...(options.mode===undefined?{}:{mode:options.mode})}); return json(res, { ok: true }); }
       if (url.pathname === '/api/models/download' && req.method === 'POST') return json(res, await studio.downloads.start((await body(req)).id));
       if (url.pathname === '/api/models/cancel' && req.method === 'POST') return json(res, await studio.downloads.cancel((await body(req)).id));
       if (url.pathname === '/api/models/load' && req.method === 'POST') { await studio.loadModel((await body(req)).id); return json(res, { ok: true }); }

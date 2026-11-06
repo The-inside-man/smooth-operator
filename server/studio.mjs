@@ -1,7 +1,10 @@
+import {TimingHistory,TimedRun,timingKey,modelTimingKey} from './timing.mjs';
+import {cloudSelection,generateCloud} from './cloud-provider.mjs';
+import {intentSchema} from './provider-intents.mjs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -21,7 +24,7 @@ import { MemoryMonitor, estimateModelBytes } from './memory.mjs';
 const exec = promisify(execFile);
 const defaultModelKinds = { chat: 'chat', code: 'chat', image: 'image', upscale: 'upscale', video: 'video', transcribe: 'transcribe' };
 const defaultModes = ['agent', ...Object.keys(defaultModelKinds)];
-const defaults = { mainAgentModelId: '', defaultMode: 'agent', defaultModels: {}, agentMaxSteps: 4, agentTimeoutSeconds: 600, libraryRoot: '', backend: 'auto', systemPrompt: 'You are TIM, a capable local AI assistant. Help users choose suitable local models, explain their strengths and memory needs, and be clear, practical, and accurate.', temperature: 0.7, maxTokens: 1024, context: 4096, scanlines: false };
+const defaults = { mainAgentModelId: '', defaultMode: 'agent', defaultModels: {}, agentMaxSteps: 4, agentTimeoutSeconds: 600, libraryRoot: '', backend: 'auto', systemPrompt: 'You are TIM, a capable local AI assistant. Help users choose suitable local models, explain their strengths and memory needs, and be clear, practical, and accurate.', temperature: 0.7, maxTokens: 0, context: 4096, scanlines: false };
 const numeric = (value, fallback, min, max, integer = true) => { const n = value === undefined ? fallback : Number(value); if (!Number.isFinite(n) || n < min || n > max || (integer && !Number.isInteger(n))) throw new Error(`Value must be ${integer ? 'an integer ' : ''}between ${min} and ${max}.`); return n; };
 const waitForLoad = (promise, signal) => new Promise((resolve, reject) => {
   signal.throwIfAborted();
@@ -40,23 +43,27 @@ export function jobSettings(body, kind, model) {
 }
 export class Studio extends EventEmitter {
   constructor(dataDir) {
-    super(); this.dataDir = dataDir; this.store = new Store(dataDir); this.sessions = []; this.jobs = []; this.registry = { models: [], runtimes: {} }; this.active = null; this.closing = false;
+    super(); this.timings=new TimingHistory(); this.dataDir = dataDir; this.store = new Store(dataDir); this.sessions = []; this.jobs = []; this.registry = { models: [], runtimes: {} }; this.active = null; this.closing = false;
     this.workDir = path.join(dataDir, 'work'); this.outputDir = path.join(dataDir, 'outputs'); this.uploadDir = path.join(dataDir, 'uploads'); this.llama = new LlamaPool(this.workDir); this.generateMedia = args => this.runMedia(args); this.gpu = null;
     this.orchestrator = new Llama(this.workDir); this.catalog = catalogModels; this.memoryMonitor = new MemoryMonitor();
-    this.lifecycle = new AbortController(); this.runtimeSetup = { status: 'idle' }; this.guideState = {};
+    this.lifecycle = new AbortController(); this.runtimeSetup = { status: 'idle' }; this.guideState = {}; this.localSetup = { status: 'idle' };
+    this.hardware = { cpuName: os.cpus()[0]?.model || 'CPU', logicalCores: os.availableParallelism(), platform: process.platform, arch: process.arch };
     this.downloads = new DownloadManager(dataDir, { onChange: jobs => this.downloadChanged(jobs) });
     this.pipelines = new PipelineManager(dataDir, { executeStep: createPipelineExecutor(this), validateModel: node => validatePipelineModel(this, node), onChange: () => this.pipelineChanged() });
   }
-  async init() {
+  async init({ telemetry = true, libraryRoot } = {}) {
     await Promise.all([this.workDir, this.outputDir, this.uploadDir].map(d => fs.mkdir(d, { recursive: true })));
     this.config = { ...defaults, ...await this.store.read('settings', {}) };
+    if (libraryRoot !== undefined) this.config.libraryRoot = libraryRoot;
     this.sessions = await this.store.read('sessions', []);
     this.jobs = await this.store.read('jobs', []);
+    this.timings=new TimingHistory(await this.store.read('timings',null).catch(()=>null));
     await this.downloads.init();
     await this.pipelines.init();
     for (const j of this.jobs) if (['queued', 'running'].includes(j.status)) { j.status = 'interrupted'; j.phase = 'Interrupted when the app closed. Submit again to retry.'; const m = this.sessions.find(s => s.id === j.sessionId)?.messages.find(m => m.jobId === j.id); if (m) m.status = 'interrupted'; for (const child of j.children || []) if (['queued', 'running'].includes(child.status)) { child.status = 'interrupted'; child.phase = 'Interrupted when the app closed.'; } if (m && j.children) m.steps = j.children; }
     await this.rescan(); await this.persist();
-    await this.telemetry(); this.telemetryTimer = setInterval(() => this.telemetry(), 5000); this.telemetryTimer.unref();
+    if (libraryRoot !== undefined) await this.store.write('settings', this.config);
+    if (telemetry) { await this.telemetry(); this.telemetryTimer = setInterval(() => this.telemetry(), 5000); this.telemetryTimer.unref(); }
   }
   async rescan() {
     if (this.active || this.loadingModel) throw new Error('Wait for the current job before scanning models.');
@@ -79,7 +86,7 @@ export class Studio extends EventEmitter {
     }
     this.registry.models = [...this.registry.models.filter(model => !model.catalogId), ...downloaded];
     const guide = this.registry.models.find(model => model.catalogId === defaultOrchestratorId);
-    if (!this.config.mainAgentModelId && guide) {
+    if (!this.config.mainAgentModelId && guide && !(this.localSetup.explicit && (this.localSetup.status !== 'ready' || this.localSetup.mode && this.localSetup.mode !== 'agent'))) {
       this.config.mainAgentModelId = guide.id;
       await this.store.write('settings', this.config);
     }
@@ -109,13 +116,28 @@ export class Studio extends EventEmitter {
     if (!model.available || !this.registry.runtimes.chat) return `${model.name} is not ready: ${model.issue || 'a compatible chat engine is required'}. Set up this model or choose another agent in Settings.`;
     return null;
   }
-  async setupGuide() {
-    if (this.setupPromise) return;
+  async setupGuide({ installRuntime = false, background = false, catalogId, mode = 'agent' } = {}) {
+    if(!['agent','chat','code'].includes(mode)||mode!=='agent'&&catalogId===undefined)throw new Error('Choose a supported setup mode and catalog model.');
+    if (catalogId !== undefined && (typeof catalogId !== 'string' || !this.catalog.some(model => model.id === catalogId && model.kind === 'chat'))) throw new Error('Choose a supported chat model from the local setup catalog.');
+    if (this.setupPromise) {
+      if (catalogId && (this.localSetup.catalogId !== catalogId || (this.localSetup.mode||'agent') !== mode)) throw new Error('Finish the current local model setup before choosing another model.');
+      return;
+    }
+    if (this.active || this.loadingModel) throw new Error('Finish or cancel current jobs before setting up the local model.');
+    if (catalogId !== undefined) return this.setupCatalogModel(catalogId,mode);
+    const configuredId=this.config.mainAgentModelId;
     if (this.config.mainAgentModelId) {
       const error = this.guideSelectionError();
-      if (error) { this.guideState = { status: 'error', error }; this.changed(); return; }
-      await this.warmGuide();
-      return;
+      const installed=this.registry.models.some(model=>model.id===configuredId&&model.kind==='chat');
+      if (!error) {
+        this.runtimeSetup={status:'ready',progress:100};this.guideState={};this.changed();
+        if (!background) { await this.warmGuide(); return; }
+        this.setupPromise=this.warmGuide().catch(error=>{
+          if(!this.closing){this.runtimeSetup={status:'error',error:error.message};this.guideState={status:'error',error:error.message};this.changed();}
+        }).finally(()=>{this.setupPromise=null;});
+        return;
+      }
+      if (!installRuntime || !installed || this.registry.runtimes.chat) { this.guideState = { status: 'error', error }; this.changed(); return; }
     }
     this.runtimeSetup = { status: 'downloading', progress: 0 }; this.guideState = {}; this.changed();
     // Setup runs in the background so the catalog and progress remain usable.
@@ -123,6 +145,11 @@ export class Studio extends EventEmitter {
       try {
         await ensureChatRuntime(this.dataDir, this.libraryRoot, { signal: this.lifecycle.signal, onChange: state => { this.runtimeSetup = state; this.changed(); } });
         if (!this.registry.runtimes.chat) this.registry.runtimes.chat = await findRuntime(this.libraryRoot, 'chat', this.config.backend, this.dataDir) || await findSystemChatRuntime(this.config.backend);
+        if (configuredId) {
+          await this.rescan();
+          const error=this.guideSelectionError();if(error)throw new Error(error);
+          await this.warmGuide();return;
+        }
         await this.downloads.start(defaultOrchestratorId);
         while (!this.closing) {
           this.lifecycle.signal.throwIfAborted();
@@ -138,6 +165,45 @@ export class Studio extends EventEmitter {
       } catch (error) {
         if (!this.closing) { this.runtimeSetup = { status: 'error', error: error.message }; this.guideState = { status: 'error', error: error.message }; this.changed(); }
       } finally { this.setupPromise = null; }
+    })();
+  }
+  async setupCatalogModel(catalogId,mode='agent') {
+    if (this.guideLoadPromise || this.jobs.some(job => job.status === 'queued')) throw new Error('Finish or cancel current work before setting up another model.');
+    const previousId=this.config.mainAgentModelId;
+    const identity={catalogId,explicit:true,...(mode==='agent'?{}:{mode})};
+    this.localSetup={...identity,status:'installing'};this.runtimeSetup={status:'downloading',progress:0};this.changed();
+    this.setupPromise=(async()=>{
+      try{
+        await ensureChatRuntime(this.dataDir,this.libraryRoot,{signal:this.lifecycle.signal,onChange:state=>{this.runtimeSetup=state;this.changed();}});
+        this.registry.runtimes.chat ||= await findRuntime(this.libraryRoot,'chat',this.config.backend,this.dataDir) || await findSystemChatRuntime(this.config.backend);
+        await this.downloads.start(catalogId);
+        while(!this.closing){
+          this.lifecycle.signal.throwIfAborted();
+          const download=this.downloads.snapshot().find(job=>job.catalogId===catalogId);
+          if(download?.status==='completed')break;
+          if(['failed','cancelled','paused'].includes(download?.status))throw new Error(download.error || 'Model setup stopped. Retry to continue.');
+          await new Promise(resolve=>setTimeout(resolve,150));
+        }
+        if(this.closing)return;
+        await this.modelSync;await this.refreshDownloadedModels();
+        const model=this.registry.models.find(model=>model.catalogId===catalogId&&model.kind==='chat'&&model.available);
+        if(!model)throw new Error('The selected model is not available after setup. Check its files and chat engine, then retry.');
+        if(mode==='agent'){
+          await this.loadOrchestrator(model,this.lifecycle.signal,()=>this.changed());
+          const next={...this.config,mainAgentModelId:model.id};
+          await this.store.write('settings',next);this.config=next;
+        }else{
+          if(model.id===this.config.mainAgentModelId)await this.loadOrchestrator(model,this.lifecycle.signal,()=>this.changed());
+          else await this.loadChat(model,this.lifecycle.signal,()=>this.changed());
+        }
+        this.localSetup={...identity,status:'ready'};this.changed();
+      }catch(error){
+        if(!this.closing){
+          this.localSetup={...identity,status:'error',error:error.message};
+          if(mode==='agent'&&this.config.mainAgentModelId===previousId)this.guideState={};
+          this.changed();
+        }
+      }finally{this.setupPromise=null;}
     })();
   }
   async startDefaultGuide() {
@@ -159,8 +225,8 @@ export class Studio extends EventEmitter {
     const model = this.registry.models.find(m => m.id === this.config.mainAgentModelId);
     await this.loadOrchestrator(model, this.lifecycle.signal, () => this.changed());
   }
-  async loadOrchestrator(model, signal, update) {
-    this.orchestrator.fixedContext = true;
+  async loadOrchestrator(model, signal, update, context = this.config.context || 4096) {
+    this.orchestrator.fixedContext = false;
     if (this.guideLoadPromise) await waitForLoad(this.guideLoadPromise, signal);
     signal.throwIfAborted();
     if (!model?.available || !this.registry.runtimes.chat) throw new Error('The TIM guide needs an installed model and chat engine.');
@@ -169,7 +235,7 @@ export class Studio extends EventEmitter {
       try {
         const runtime = await findRuntime(this.libraryRoot, 'chat', 'cpu', this.dataDir) || await findSystemChatRuntime('cpu') || this.registry.runtimes.chat;
         await this.sampleMemory(); this.assertModelMemory(model, { role: 'guide' });
-        await this.orchestrator.load(model, { ...runtime, backend: 'cpu', threads: Math.min(4, os.availableParallelism()) }, signal, update, 4096, true);
+        await this.orchestrator.load(model, { ...runtime, backend: 'cpu', threads: Math.min(4, os.availableParallelism()) }, signal, update, context, true);
         this.guideState = { status: 'running' };
       } catch (error) { this.guideState = { status: 'error', error: error.message }; throw error; }
       finally { this.guideLoadPromise = null; this.changed(); }
@@ -177,6 +243,7 @@ export class Studio extends EventEmitter {
     await this.guideLoadPromise;
   }
   async loadModel(id) {
+    if(this.setupPromise&&this.localSetup.explicit)throw new Error('Wait for local model setup to finish before loading another model.');
     if (this.active || this.loadingModel || this.guideLoadPromise || this.jobs.some(j => j.status === 'queued')) throw new Error('Finish or cancel current work before loading a model.');
     const model = this.registry.models.find(m => m.id === id && m.available);
     if (!model || model.kind !== 'chat') throw new Error('Choose an installed chat or code model. Media models load when used.');
@@ -194,14 +261,16 @@ export class Studio extends EventEmitter {
     }
   }
   async unloadModel(id) {
+    if(this.setupPromise&&this.localSetup.explicit)throw new Error('Wait for local model setup to finish before unloading a model.');
     if (this.active || this.loadingModel || this.guideLoadPromise || this.jobs.some(j => j.status === 'queued')) throw new Error('Finish or cancel current work before unloading.');
-    if (id && id === this.config.mainAgentModelId) throw new Error('The lightweight TIM guide stays loaded. Other models can be unloaded.');
+    const specialist = id && (this.llama.has?.(id) || this.llama.modelId === id), pipelineAgent = id && this.pipelineAgent?.modelId === id;
+    if (id && id === this.orchestrator.modelId && !specialist && !pipelineAgent) throw new Error('The lightweight TIM guide stays loaded. Other models can be unloaded.');
     this.loadingModel = true; this.changed();
     try {
       if (!id) { await this.unloadSpecialists(); await this.pipelineAgent?.unload(); }
       else {
-        if (this.llama.has?.(id) || this.llama.modelId === id) await this.llama.unload(id);
-        if (this.pipelineAgent?.modelId === id) await this.pipelineAgent.unload();
+        if (specialist) await this.llama.unload(id);
+        if (pipelineAgent) await this.pipelineAgent.unload();
       }
       await this.sampleMemory();
     } finally { this.loadingModel = false; this.changed(); }
@@ -246,6 +315,7 @@ export class Studio extends EventEmitter {
   }
   validatePipeline(value) { return validatePipeline(value); }
   async runPipeline({ pipelineId, input = '', attachments = [] }) {
+    if(this.setupPromise&&this.localSetup.explicit)throw new Error('Wait for local model setup to finish before starting a pipeline.');
     if (this.closing) throw new Error('TIM Studio is closing.');
     if (this.loadingModel) throw new Error('Wait for the selected model to finish loading.');
     if (!Array.isArray(attachments) || attachments.length > 16) throw new Error('Choose at most 16 uploaded attachments.');
@@ -265,6 +335,7 @@ export class Studio extends EventEmitter {
     await this.persist(); this.changed(); return run;
   }
   async resumePipeline(id) {
+    if(this.setupPromise&&this.localSetup.explicit)throw new Error('Wait for local model setup to finish before resuming a pipeline.');
     if (this.closing) throw new Error('TIM Studio is closing.');
     if (this.loadingModel) throw new Error('Wait for the selected model to finish loading.');
     const run = await this.pipelines.resume(id);
@@ -344,15 +415,23 @@ export class Studio extends EventEmitter {
     const pipelineState = this.pipelines.snapshot();
     this.memoryMonitor.catalog = this.catalog;
     const memoryState = this.memoryMonitor.snapshot(this.loadedEngines());
-    return { platform: process.platform, arch: process.arch, hostname: os.hostname(), ...memoryState, gpu: this.gpu, libraryRoot: this.libraryRoot, dataDir: this.dataDir, config: this.config,
+    return { platform: process.platform, arch: process.arch, hostname: os.hostname(), hardware:this.hardware, ...memoryState, gpu: this.gpu, libraryRoot: this.libraryRoot, dataDir: this.dataDir, config: this.config,
       models: this.registry.models.map(({ file, profile, ...rest }) => ({ ...rest, ...(rest.kind === 'image' ? { inputMode: mediaInputMode(rest.kind, { profile }), requiresReference: Boolean(profile?.requiresReference) } : {}), defaults: profile && { steps: profile.steps, cfg: profile.cfg, width: profile.width, height: profile.height } })),
       engines: Object.fromEntries(Object.entries(this.registry.runtimes).map(([kind, r]) => [kind, r ? { available: true, backend: r.backend } : { available: false }])),
-      sessions: this.sessions, jobs: this.jobs, loadedModelId: this.llama.modelId, loadingModel: Boolean(this.loadingModel),
+      sessions: this.sessions, jobs: this.jobs.map(job=>job===this.active?.job&&this.active.timing?{...job,timing:this.active.timing.snapshot(),phaseTiming:this.active.phaseTiming?.snapshot()}:job), loadedModelId: this.llama.modelId, loadingModel: Boolean(this.loadingModel),
       catalog: this.catalog.map(({ files, ...entry }) => { const model = this.registry.models.find(m => m.catalogId === entry.id); return { ...entry, bundleFiles: files?.length || 0, ...(entry.kind === 'image' ? { inputMode: mediaInputMode(entry.kind, entry), requiresReference: Boolean(entry.profile?.requiresReference) } : {}), installed: Boolean(model), modelId: model?.id, issue: model?.issue || '' }; }),
-      downloads: this.downloads.snapshot(), orchestrator: this.guideSnapshot(), runtimeSetup: this.runtimeSetup,
+      downloads: this.downloads.snapshot(), orchestrator: this.guideSnapshot(), runtimeSetup: this.runtimeSetup, localSetup:this.localSetup,
       pipelines: pipelineState.definitions, pipelineRuns: pipelineState.runs, pipelineAgentModelId: this.pipelineAgent?.modelId || null };
   }
-  changed() { if (this.changeTimer) return; this.changeTimer = setTimeout(() => { this.changeTimer = null; this.emit('state', this.snapshot()); }, 75); }
+  changed() {
+    const job=this.active?.job;
+    if(job){
+      const message=this.sessions.find(s=>s.id===job.sessionId)?.messages.find(m=>m.jobId===job.id);
+      const signature=JSON.stringify([job.status,job.phase,job.progress,message?.content?.length,job.children]);
+      if(this.activitySignature!==signature){this.active.timing?.touch();this.active.phaseTiming?.touch();job.lastActivityAt=Date.now();this.activitySignature=signature;}
+    }
+    if (this.changeTimer) return; this.changeTimer = setTimeout(() => { this.changeTimer = null; this.emit('state', this.snapshot()); }, 75); }
+  async resetTimings(){if(this.active)throw new Error('Finish or cancel current work before resetting estimates.');this.timings.clear();await this.store.write('timings',this.timings.export());}
   async persist() { await this.store.write('sessions', this.sessions); await this.store.write('jobs', this.jobs); }
   validateDefaultModels(value) {
     if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Default models must be a map of modes to installed model IDs.');
@@ -380,6 +459,7 @@ export class Studio extends EventEmitter {
     return { defaultMode: this.config.defaultMode, defaultModels: this.config.defaultModels, mainAgentModelId: this.config.mainAgentModelId };
   }
   async updateSettings(values) {
+    if(this.setupPromise&&this.localSetup.explicit)throw new Error('Wait for local model setup to finish before changing engine settings.');
     if (this.active || this.loadingModel || this.guideLoadPromise || this.jobs.some(j => j.status === 'queued')) throw new Error('Finish or cancel jobs before changing engine settings.');
     const next = { ...this.config };
     if (values.mainAgentModelId !== undefined) {
@@ -397,24 +477,45 @@ export class Studio extends EventEmitter {
     if (values.systemPrompt !== undefined) next.systemPrompt = String(values.systemPrompt);
     if (values.backend !== undefined) { if (!['auto', 'cpu', 'cuda', 'vulkan', 'metal'].includes(values.backend)) throw new Error('Unknown backend'); next.backend = values.backend; }
     if (values.temperature !== undefined) next.temperature = numeric(values.temperature, 0.7, 0, 2, false);
-    if (values.maxTokens !== undefined) next.maxTokens = numeric(values.maxTokens, 1024, 1, 8192);
-    if (values.context !== undefined) next.context = numeric(values.context, 4096, 512, 32768);
+    if (values.maxTokens !== undefined) next.maxTokens = numeric(values.maxTokens, 0, 0, 1048576);
+    if (values.context !== undefined) next.context = numeric(values.context, 4096, 512, 1048576);
     if (values.scanlines !== undefined) next.scanlines = Boolean(values.scanlines);
-    if (next.maxTokens >= next.context) throw new Error('Response tokens must be smaller than the context window.');
+    const reload = ['mainAgentModelId','backend','context','libraryRoot'].some(key=>next[key]!==this.config[key]);
     if (next.mainAgentModelId !== this.config.mainAgentModelId) { await this.orchestrator.unload(); this.guideState = {}; }
-    await this.unloadSpecialists(); await this.pipelineAgent?.unload(); this.config = next; await this.store.write('settings', next); await this.rescan(); this.changed();
-    if (this.config.mainAgentModelId) this.warmGuide().catch(error => { this.guideState = { status: 'error', error: error.message }; this.changed(); });
+    if (reload) { await this.unloadSpecialists(); await this.pipelineAgent?.unload(); }
+    this.config = next; await this.store.write('settings', next); await this.rescan(); this.changed();
+    if (reload && this.config.mainAgentModelId) this.warmGuide().catch(error => { this.guideState = { status: 'error', error: error.message }; this.changed(); });
   }
   async newSession() {
     const session = { id: randomUUID(), title: 'New session', createdAt: new Date().toISOString(), messages: [] };
     this.sessions.unshift(session); await this.persist(); this.changed(); return session;
   }
   async enqueue(body) {
+    if (!body.requestId) return this.enqueueOnce(body);
+    if (typeof body.requestId !== 'string' || !/^[a-zA-Z0-9-]{16,80}$/.test(body.requestId)) throw new Error('Invalid submission ID.');
+    const fingerprint = createHash('sha256').update(JSON.stringify(body)).digest('hex');
+    this.submissions ||= new Map();
+    const prior = this.jobs.find(j => j.requestId === body.requestId);
+    if (prior) { if (prior.requestFingerprint !== fingerprint) throw new Error('Submission ID already used for different input.'); return prior; }
+    const pending = this.submissions.get(body.requestId);
+    if (pending) { if (pending.fingerprint !== fingerprint) throw new Error('Submission ID conflict.'); return pending.promise; }
+    const promise = this.enqueueOnce(body, fingerprint);
+    this.submissions.set(body.requestId, { fingerprint, promise });
+    try { return await promise; } finally { this.submissions.delete(body.requestId); }
+  }
+  async enqueueOnce(body, fingerprint) {
+    if(this.setupPromise&&this.localSetup.explicit)throw new Error('Wait for local model setup to finish before sending a request. Your draft is preserved.');
+    const cloud = body.provider && body.provider !== 'local' ? cloudSelection(body.provider, body.modelId) : null;
+    if (cloud && !['chat','code'].includes(body.kind)) throw new Error('Cloud providers support text chat/code and typed CLI planning; local agent/media modes are not supported.');
+    if (body.intentKind) intentSchema(body.intentKind);
+    const existingSession = this.sessions.find(s => s.id === body.sessionId);
+    if (cloud && ((body.attachments || []).length || existingSession?.messages.some(m => m.attachments?.length || m.artifact || m.steps?.length))) throw new Error('Cloud requests cannot include files, artifacts or tool transcripts. Start a new session.');
+    if (existingSession?.messages.length && (existingSession.provider || 'local') !== (cloud?.provider || 'local')) throw new Error('Provider boundary changed. Start a new session; history is never transferred automatically.');
     if (this.loadingModel) throw new Error('Wait for the selected model to finish loading.');
     const kind = body.kind === 'code' ? 'chat' : body.kind;
     if (!['agent', 'chat', 'image', 'video', 'transcribe', 'upscale'].includes(kind)) throw new Error('Choose an available mode.');
     const modelId = kind === 'agent' ? this.config.mainAgentModelId : body.modelId === undefined ? this.config.defaultModels?.[body.kind] : body.modelId;
-    const model = this.registry.models.find(m => m.id === modelId && m.kind === (kind === 'agent' ? 'chat' : kind));
+    const model = cloud ? {id:modelId,name:cloud.provider+'/'+modelId,kind:'chat',available:true} : this.registry.models.find(m => m.id === modelId && m.kind === (kind === 'agent' ? 'chat' : kind));
     if (kind === 'agent' && (!model?.available || !this.registry.runtimes.chat)) throw new Error('Choose an available main agent model in Settings. Native tool-call support must be validated for that model.');
     if (!model?.available) throw new Error(model?.issue || 'Select a compatible model.');
     const settings = jobSettings(body, kind, model);
@@ -437,11 +538,12 @@ export class Studio extends EventEmitter {
     validateMediaInput(kind, model, attachments[0]);
     let session = this.sessions.find(s => s.id === body.sessionId);
     if (!session) session = await this.newSession();
+    session.provider = cloud?.provider || 'local';
     const id = randomUUID();
     if (!session.messages.length) session.title = (settings.prompt || `${kind} recording`).slice(0, 48);
     session.messages.push({ id: randomUUID(), role: 'user', content: settings.prompt || (kind === 'upscale' ? 'Upscale this image 4×.' : 'Transcribe this recording.'), attachments, createdAt: new Date().toISOString() });
     session.messages.push({ id: randomUUID(), role: 'assistant', content: '', jobId: id, model: model.name, kind, status: 'queued', createdAt: new Date().toISOString() });
-    const job = { id, sessionId: session.id, modelId: model.id, modelName: model.name, kind, settings, attachments, platform: process.platform, arch: process.arch, status: 'queued', phase: 'Queued', progress: null, createdAt: new Date().toISOString() };
+    const job = { id, requestId:body.requestId, requestFingerprint:fingerprint, provider:cloud?.provider || 'local', intentKind:body.intentKind, sessionId: session.id, modelId: model.id, modelName: model.name, kind, settings, attachments, platform: process.platform, arch: process.arch, status: 'queued', phase: 'Queued', progress: null, createdAt: new Date().toISOString() };
     this.jobs.unshift(job); await this.persist(); this.changed(); this.drain().catch(e => this.emit('error', e)); return job;
   }
   async loadChat(model, signal, update, toolCalling = false) {
@@ -467,16 +569,25 @@ export class Studio extends EventEmitter {
     if (job.kind === 'pipeline') { await this.drainPipeline(job, controller); return; }
     let timedOut = false;
     const timer = job.kind === 'agent' ? setTimeout(() => { timedOut = true; controller.abort(new Error('Main agent turn timed out.')); }, (this.config.agentTimeoutSeconds ?? 600) * 1000) : null;
-    const model = this.registry.models.find(m => m.id === job.modelId);
+    const model = job.provider && job.provider !== 'local' ? {id:job.modelId,name:job.modelName,kind:'chat',available:true} : this.registry.models.find(m => m.id === job.modelId);
+    const guideChat = job.kind === 'chat' && (!job.provider || job.provider === 'local') && model?.id === this.config.mainAgentModelId;
+    const chatEngine = guideChat ? this.orchestrator : this.llama;
     const session = this.sessions.find(s => s.id === job.sessionId);
     const message = session.messages.find(m => m.jobId === job.id);
+    this.active.timing=new TimedRun(this.timings,modelTimingKey(job,this.config,chatEngine.modelId===job.modelId));
     job.status = message.status = 'running'; job.startedAt = Date.now(); job.phase = 'Preparing engine…'; this.changed();
     try {
-      await this.pipelineAgent?.unload();
+      if (!job.provider || job.provider === 'local') await this.pipelineAgent?.unload();
       if (!model) throw new Error('Model is no longer available.');
       if (['chat', 'agent'].includes(job.kind)) {
-        const update = phase => { job.phase = phase; this.changed(); };
-        if (job.kind === 'chat') await this.loadChat(model, controller.signal, update);
+        const update = phase => { this.active?.timing?.touch();this.active?.phaseTiming?.touch();job.phase = phase; job.lastActivityAt=Date.now(); this.changed(); };
+        if (job.kind === 'chat' && (!job.provider || job.provider === 'local')) {
+          if(chatEngine.modelId!==model.id)this.active.phaseTiming=new TimedRun(this.timings,timingKey({provider:'local',model:model.id,operation:'load-cold',backend:guideChat?'cpu':this.config.backend,context:this.config.context}));
+          update('Loading local model');
+          if(guideChat)await this.loadOrchestrator(model,controller.signal,update);
+          else await this.loadChat(model, controller.signal, update);
+          this.active.phaseTiming?.finish('completed');delete this.active.phaseTiming;
+        }
         const history = [];
         for (const m of session.messages.slice(0, session.messages.indexOf(message))) {
           if (m.role === 'assistant' && m.status !== 'completed') continue;
@@ -484,15 +595,17 @@ export class Studio extends EventEmitter {
           for (const name of m.attachments || []) if (/\.(txt|md|js|ts|py|json|csv|html|css)$/i.test(name)) content += '\n\nAttached file:\n' + (await fs.readFile(path.join(this.uploadDir, name), 'utf8')).slice(0, 60000);
           if (content) history.push({ role: m.role, content });
         }
-        job.phase = 'Generating response';
+        update('Waiting for model output');
         if (job.kind === 'agent') await runAgent(this, job, message, history, controller.signal);
-        else await this.llama.generate([{ role: 'system', content: this.config.systemPrompt }, ...history], { ...this.config, enableThinking: false }, controller.signal, token => { message.content += token; this.changed(); }, usage => {
+        else if (job.provider && job.provider !== 'local') await (this.generateCloud || generateCloud)({provider:job.provider,modelId:job.modelId,messages:[{role:'system',content:'You are TIM Studio. Give clear practical answers. Do not claim to execute tools.'},...history],maxTokens:this.config.maxTokens, intentKind:job.intentKind,signal:controller.signal,onActivity:phase=>update(phase),onText:token=>{message.content+=token;this.changed();}});
+        else await chatEngine.generate([{ role: 'system', content: this.config.systemPrompt }, ...history], { ...this.config, enableThinking: false }, controller.signal, token => { message.content += token; job.lastActivityAt=Date.now(); job.phase='Generating response'; this.changed(); }, usage => {
           if (usage.removedMessages > 0) { job.contextUsage = usage; message.contextUsage = usage; this.changed(); }
         });
         if (!message.content.trim()) throw new Error('The model returned no answer. Try again or choose a different model.');
       } else {
         await this.releaseSpecialist(); job.phase = 'Loading engine…'; this.changed();
         const result = await this.generateMedia({ kind: job.kind, model, runtime: this.registry.runtimes[job.kind], settings: job.settings, input: job.attachments[0] && path.join(this.uploadDir, job.attachments[0]), workDir: this.workDir, outputDir: this.outputDir, id: job.id, signal: controller.signal, onOutput: text => {
+          job.lastActivityAt=Date.now();
           const percent = [...text.matchAll(/(\d+(?:\.\d+)?)%/g)].at(-1);
           const steps = [...text.matchAll(/(\d+)\s*\/\s*(\d+)\s*[-|]/g)].at(-1);
           if (percent) job.progress = Math.min(99, Number(percent[1]));
@@ -506,12 +619,12 @@ export class Studio extends EventEmitter {
       job.status = message.status = 'completed'; job.phase = 'Complete'; job.progress = 100; model.validation = 'Ran successfully';
     } catch (error) {
       job.status = message.status = controller.signal.aborted && !timedOut ? 'cancelled' : 'failed';
-      job.phase = timedOut ? 'Main agent turn timed out.' : controller.signal.aborted ? 'Cancelled' : error.message;
+      job.phase = timedOut ? 'Main agent turn timed out.' : controller.signal.aborted ? (job.provider && job.provider !== 'local' ? 'Cancelled locally; provider stopping/billing not confirmed.' : 'Cancelled') : error.message;
       message.error = job.phase;
       if (model && !controller.signal.aborted) model.validation = 'Last run failed';
-      if (['chat', 'agent'].includes(job.kind)) await this.releaseSpecialist();
+      if (['chat', 'agent'].includes(job.kind) && (!job.provider || job.provider === 'local') && !guideChat) await this.releaseSpecialist();
     } finally {
-      clearTimeout(timer); job.finishedAt = Date.now(); this.active = null; await this.persist(); this.changed();
+      clearTimeout(timer); job.finishedAt = Date.now(); job.timing=this.active.timing?.finish(job.status);this.active.phaseTiming?.finish(job.status);await this.store.write('timings',this.timings.export()).catch(()=>{});this.active = null; await this.persist(); this.changed();
       if (!this.closing) queueMicrotask(() => this.drain().catch(e => this.emit('error', e)));
     }
   }

@@ -1,0 +1,2 @@
+for(const action of ['mute','unmute','stop','hide'])document.getElementById(action).onclick=()=>window.timVoice.control(action);
+window.timVoice.onState(state=>{document.getElementById('state').textContent=state.state.toUpperCase();document.getElementById('detail').textContent=state.listening?'Microphone active · say “TIM …”':'Microphone inactive';if(state.hood)document.getElementById('hood').textContent=state.hood;});

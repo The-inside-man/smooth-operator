@@ -181,7 +181,7 @@ test('restart marks queued and active runs interrupted and never replays models 
   assert.deepEqual(calls, ['b']); assert.equal(reopened.getRun(active.id).status, 'completed');
 });
 
-test('result text and ancestor context are bounded while artifacts stay available', async t => {
+test('long result text is preserved while ancestor context stays bounded and artifacts stay available', async t => {
   let received;
   const { manager } = await fixture(t, { executeStep: async (step, context) => {
     if (step.id === 'join') { received = context; return { text: 'combined' }; }
@@ -189,7 +189,7 @@ test('result text and ancestor context are bounded while artifacts stay availabl
   } });
   const saved = await manager.save(definition([node('a'), node('b'), node('c'), node('join', { dependsOn: ['a', 'b', 'c'] })]));
   const run = await manager.createRun({ pipelineId: saved.id }); await manager.execute(run.id);
-  assert.equal(run.status, 'completed'); assert.equal(run.nodeRuns[0].text.length, PIPELINE_LIMITS.result);
+  assert.equal(run.status, 'completed'); assert.equal(run.nodeRuns[0].text.length, 200000);assert.ok(run.nodeRuns[0].text.length<=PIPELINE_LIMITS.result);
   assert.ok(Object.values(received.results).reduce((sum, result) => sum + result.text.length, 0) <= PIPELINE_LIMITS.context);
   assert.equal(received.artifacts.length, 3);
 });

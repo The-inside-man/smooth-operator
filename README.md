@@ -10,7 +10,7 @@ Contributions and bug reports are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.m
 
 ## Screenshots
 
-Interface previews use example data. The completed pipeline shows saved results from a real local run.
+Desktop interface previews use example data. The completed pipeline shows saved results from a real local run.
 
 **Local AI workspace** — chat with TIM, choose a capability, and open the model library or pipeline builder.
 
@@ -27,6 +27,16 @@ Interface previews use example data. The completed pipeline shows saved results 
 **Local execution** — inspect completed steps and delegated work from the five-step coding and review example.
 
 ![Completed local pipeline showing model loading, code generation, delegated review, and model unloading](docs/screenshots/pipeline-run.webp)
+
+The CLI images below show live output from an isolated local session, rendered with xterm.js rather than captured from a native terminal window.
+
+**CLI startup:** the welcome screen with a configured local model, workspace details, and command input.
+
+![TIM CLI startup screen with the TIM Studio artwork, selected local model, empty session, and command input](docs/screenshots/cli-startup.png)
+
+**CLI model selection:** open `/models` to browse installed and downloadable models, compare memory estimates, and review setup before downloading.
+
+![TIM CLI model selector with the installed Qwen3 0.6B model, Qwen3 8B highlighted, download sizes, memory estimates, and keyboard controls](docs/screenshots/cli-model-selection.png)
 
 ## Run on Windows, macOS, and Linux
 
@@ -50,6 +60,32 @@ The packaged app includes its JavaScript runtime and interface and does not need
 
 Browser mode works on all three platforms: run `npm run build`, then `npm start`, and open [http://127.0.0.1:4317](http://127.0.0.1:4317).
 
+## Use TIM from your terminal
+
+The [TIM CLI](CLI.md) runs without opening the desktop app or browser frontend. Run `tim` for local models, or connect to ChatGPT/OpenAI, Grok/xAI or Claude/Anthropic model APIs without downloading local weights:
+
+```sh
+tim setup                 # Choose and set up a local chat/code model
+tim providers             # Show the available API connections
+tim providers openai      # ChatGPT / OpenAI setup
+tim providers xai         # Grok / xAI setup
+tim providers anthropic   # Claude / Anthropic setup
+```
+
+`/models` shows installed models and all supported chat/code downloads from TIM's catalog, including larger Qwen options. Installed rows select immediately; downloadable rows open review, then another Enter confirms the download and setup. `/model N` and `/agent N` use those same row numbers. Several models are marked **[SUGGESTED]** in cyan using available system memory; those estimates help choose a model and do not guarantee a successful load. `tim setup`, `/setup` or S also opens a dedicated catalog browser. Progress stays in the terminal and your choice remains selected in setup after an error; TIM does not silently substitute the smallest model. Your saved request remains ready for a separate Enter after setup, and selecting through `/models` keeps your current Agent, Chat or Code mode. Chat and Code choices keep your main agent; `/agent N` changes it.
+
+Use `/memory` to see fresh RAM headroom and the actual model processes loaded by the current TIM backend, including PID, role, measured resident RAM (RSS), and pin status. `/unload` or `/unload idle` releases idle non-guide models; `/unload N` uses a row from the last `/memory` report and verifies that process is still the one shown. Work must be finished or cancelled first. The guide stays resident, and downloaded files and selected defaults are kept. Catalog estimates are requirements, rather than current usage; RSS does not capture the full unified/GPU memory footprint.
+
+For long replies, **Ctrl+P** pages back, **Ctrl+N** pages forward and **Ctrl+L** returns to the latest text and live scrolling. Earlier chat stays in place while new text arrives, with a line-position indicator. The same page shortcuts work in guides, reviews and model menus. On Mac, hold **Control**, not Command; PageUp/PageDown and terminal-forwarded Option/Alt+Up/Down are alternatives.
+
+In the command box, **Up/Down** recall older/newer requests and commands without sending them; review or edit the recalled text, then press **Enter** to run it. Down past the newest entry restores your unsent draft. Multiline drafts keep line editing until the first/last line, then the arrows browse whole history entries. Recall uses the current session's user messages and slash commands submitted during this CLI run; it excludes assistant/system text and creates no extra history file. Slash-command recall does not survive a restart. Guides and model menus retain their arrow navigation.
+
+Two-finger trackpad and wheel scrolling work when your terminal forwards mouse reports; full-screen TIM enables them by default and follows macOS natural-scrolling direction. In Apple Terminal, check **View → Allow Mouse Reporting** ([Apple instructions](https://support.apple.com/guide/terminal/turn-on-mouse-reporting-trmlc69728a5/mac)); in iTerm2, enable **Profiles → Terminal → Enable mouse reporting** and **Report mouse wheel events** ([iTerm2 settings](https://iterm2.com/documentation-preferences-profiles-terminal.html)). Run **`tim --no-mouse`** to use the terminal's own text selection and scrollback controls. The keyboard shortcuts still work.
+
+Each guide links to the provider's API key page, shows how to set the key privately in your terminal, and gives the model-list and launch commands. Inside TIM, `/providers` opens the guides; P opens them from the model chooser. After setting the key, run `tim models --provider PROVIDER`, then `tim --provider PROVIDER --model MODEL_ID` with an exact text-model ID from your account's list. The CLI offers cloud text chat/code and typed tool planning; the desktop's media and pipelines use local models.
+
+TIM uses model APIs: a ChatGPT, Grok or Claude app login does not automatically sign TIM in. Configure API access, billing and credits in the provider account; subscription benefits vary by provider and plan. The keys are `OPENAI_API_KEY`, `XAI_API_KEY` and `ANTHROPIC_API_KEY`, respectively. Keep them out of the TIM prompt. See the [step-by-step terminal instructions](CLI.md#connect-chatgpt-grok-or-claude-from-the-terminal), [OpenAI authentication](https://developers.openai.com/api/reference/overview), [xAI quickstart](https://docs.x.ai/developers/quickstart), and [Claude API key guide](https://platform.claude.com/docs/en/get-api-key).
+
 ## Platform targets and actual validation
 
 | Platform | Desktop packaging | Existing TIM engine support | Validation here |
@@ -65,7 +101,7 @@ Native packages must be validated on their own operating systems. `.github/workf
 
 The reusable [orchestrator agent specification](ORCHESTRATOR.md) documents its role, portable model instructions, application procedures, tool contract, and the steps for replacing and validating the guide with another local model. Selecting a replacement in TIM retains the runtime application guide; the Markdown is a repository handoff document rather than an automatically loaded prompt.
 
-Agent is the initial entry mode; Settings can save a different startup mode. On a fresh setup, TIM installs **Qwen3 0.6B Q4_K_M** as the default guide and obtains a compatible llama.cpp chat engine when none is available. The guide's model download is about **397 MB**, with an estimated **1.6 GB** working memory at its fixed 4,096-token context. This is a planning estimate, not a guarantee of total process memory or model quality. The guide helps explain model strengths, memory needs and suitable specialists. Settings can select a different compatible **Main agent model**. Your selected agent is kept across restarts and rescans, including when its files or runtime are temporarily unavailable; TIM reports the issue instead of replacing it with the starter guide.
+Agent is the initial entry mode; Settings can save a different startup mode. On a fresh setup, TIM installs **Qwen3 0.6B Q4_K_M** as the default guide and obtains a compatible llama.cpp chat engine when none is available. The guide's model download is about **397 MB**, with an estimated **1.6 GB** working memory at the default 4,096-token context. This is a planning estimate, not a guarantee of total process memory or model quality. The guide helps explain model strengths, memory needs and suitable specialists. Settings can select a different compatible **Main agent model**. Your selected agent is kept across restarts and rescans, including when its files or runtime are temporarily unavailable; TIM reports the issue instead of replacing it with the starter guide.
 
 The guide runs in its own CPU process, uses at most four threads and stays loaded while specialists work. Multiple chat/code models can be preloaded into separate processes when RAM permits; manually loaded models stay ready between jobs until explicitly unloaded or engine settings change. Automatic cleanup releases temporary specialists. Inference still runs one task at a time.
 
@@ -79,9 +115,11 @@ Settings bound each turn to 1–8 specialist calls (default 4) and 30–1800 sec
 
 Choose the model in **Select model**, then **Set as default** in the active engine panel to save it for that mode and open that mode at the next launch. **Settings → Your default models** lets you choose **Start in**, the **Main agent model**, and separate defaults for Chat, Code, Image, Upscale, Video, and Audio. Switching a model for one task does not change its default. Saved unavailable choices require attention instead of silently switching to a smaller model. Saving a direct model default does not load or unload models.
 
-TIM counts the formatted prompt with the local engine's tokenizer and reserves room for the requested reply. When needed, it leaves older complete conversation turns out of the model request and shows a notice. Saved history, the latest request, and the active tool-call/result chain stay intact; history is not summarized. If the latest request still cannot fit, TIM explains how to increase **Context tokens**, lower **Response tokens**, or provide less source. Older engines without token-counting APIs use bounded retries only after explicit context errors. Context settings apply to Chat/Code specialists and pipeline model steps; the resident guide keeps its fixed 4,096-token window. Larger windows use more memory.
+TIM counts the formatted prompt with the local engine's tokenizer and budgets the reply within the loaded context. When needed, it leaves older complete conversation turns out of the model request and shows a notice. Saved history, the latest request, and the active tool-call/result chain stay intact; history is not summarized. If the latest request still cannot fit, increase **Context tokens** or provide less source. Context settings apply to the main agent, Chat/Code specialists and pipeline model steps. The default remains 4,096 tokens; larger windows use more memory and need model/engine support.
 
-Chat/Code and delegated text specialists request direct answers with thinking disabled where the model template supports it. Empty answers, exhausted response budgets, and interrupted response streams fail visibly; any partial output is retained. A context notice describes omitted history and does not indicate that an answer was generated. If a response reaches its token limit, increase **Response tokens** while leaving enough **Context tokens** for both the prompt and reply, or shorten the request.
+New setups use **Response tokens → Auto**, which removes TIM's reply-token cap and uses the space left after the prompt in the loaded context. Model/context and provider limits still apply; Auto does not make the context infinite or start extra continuation requests. Existing numeric settings remain until changed. Choose **Manual limit** for 1–1,048,576 response tokens, and **Context tokens** for 512–1,048,576 context tokens. A larger number does not guarantee model support or a reply of that length. Pipeline Advanced settings can inherit this setting, explicitly select Auto, or set a manual limit.
+
+In the CLI, use `/tokens` to inspect, `/tokens auto` or `/tokens N` to change the response limit, and `/context N` to change the loaded context. Launch flags are `--max-tokens auto|N` and `--context N`. Chat/Code specialists request direct answers with thinking disabled where supported; empty, truncated or interrupted replies fail visibly and retain partial text.
 
 TIM receives a versioned application guide from `server/app-guide.mjs`. Help questions retrieve concise instructions for the relevant controls: pipeline creation, model downloads and memory, Chat, or Settings. For application help, the guide receives the current manual and bounded user context instead of the full model catalog or outdated assistant guesses; it is offered no execution tools. Normal model recommendations and explicit specialist delegation retain their existing routes. Live application facts are limited to counts and status, without copying private pipeline instructions, paths, or conversations into the manual. The guide can explain controls but cannot click the interface or create/run saved pipelines from chat.
 
@@ -260,3 +298,36 @@ Downloaded models, external engines, fonts, and other third-party components ret
 React, Electron, Vite, Lucide, Fontsource fonts, and their dependencies retain their own licenses in the installed packages. Local engine/model files remain external and retain their original licenses. No upstream Portable-Local-Studio source or model weights are bundled into this alpha.
 
 References: [Electron installation](https://www.electronjs.org/docs/latest/tutorial/installation), [Electron process isolation](https://www.electronjs.org/docs/latest/tutorial/security), [GitHub native runner targets](https://docs.github.com/en/actions/reference/runners/github-hosted-runners).
+## Terminal Setup (Full-Screen Terminal)
+
+TIM Studio also installs as an independent terminal application, with no graphical frontend or manual server startup:
+
+```sh
+npm run pack:cli
+npm install -g ./artifacts/tim-studio-cli-0.1.0.tgz
+tim
+```
+
+For source development use `npm run cli`, `npm run cli -- --demo` or `npm run cli -- --tools`. The CLI starts and owns a loopback-only headless backend unless given `--url`; attached existing services remain owned by their caller. The GUI remains available separately.
+
+Use `/models` to see installed models alongside the full supported chat/code download catalog, including larger Qwen models. Several **[SUGGESTED]** entries use available system memory to help you choose. Enter selects an installed model or reviews a download; a second Enter confirms setup of that exact model. `/model N` and `/agent N` match the displayed row numbers. `tim setup` and **S** in the chooser open the dedicated local setup browser; **P** opens cloud setup instructions. `tim providers openai`, `tim providers xai`, and `tim providers anthropic` explain how to use OpenAI, Grok, or Claude with API keys and model IDs from your account. Your typed request is preserved through local setup and model selection.
+
+Use Up/Down in the command box to recall requests or commands, then Enter separately to rerun. Down past the latest restores your draft. Use two-finger trackpad scrolling when mouse reporting is allowed by your terminal, or Ctrl+P/Ctrl+N for earlier/later pages and Ctrl+L for the latest reply. On Mac, the shortcuts use Control, not Command. `tim --no-mouse` leaves selection and scrollback gestures with the terminal. See [CLI.md](CLI.md) for keyboard controls, package-manager support, `tim install`, local listeners, offline PCAP inspection, user-selected toolbox storage and exact limitations. All system actions require explicit review. Model proposals never become arbitrary shell commands. No models or packages are installed on startup.
+
+`npm test` covers protocol, editor, responsive renders, local process/socket fixtures, planner validation and synthetic-terminal cleanup. `node scripts/preview-cli.mjs` produces the color-faithful Ink component preview using Edge; it is not native terminal QA.
+
+### Install the terminal CLI without the graphical app
+
+Build a local installer bundle with `npm.cmd run pack:cli` on Windows (`npm run pack:cli` on Unix). In
+`artifacts/tim-studio-installer`, run `.\install-tim.cmd` on Windows
+or `sh ./install-tim.sh --shell bash` (or `zsh`/`fish`) on macOS/Linux.
+Node.js 24+ with npm is required. The scripts install per user, configure only
+user PATH/profile entries, and support repeat updates, rollback and uninstall.
+See [CLI installer instructions and platform validation limits](CLI.md#user-level-installer-windows-macos-and-linux).
+
+The CLI accepts natural requests such as `tim check port 999`, uses Enter to submit,
+and adapts to half-screen terminals at least 100 columns wide and 16 rows tall. Below that size it preserves drafts/jobs, pauses typing and approvals, and keeps cancel/quit available. See [CLI.md](CLI.md) for bounded actions,
+opt-in voice/overlay, explicit desktop-control approvals, prerequisite downloads
+and Tor routing coverage. [Silent Mode](SILENT-MODE.md) is design/preflight only
+and does not guarantee anonymity. Native voice/input adapters remain unverified
+against real user microphone/application tasks.

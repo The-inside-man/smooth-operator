@@ -22,15 +22,21 @@
     "test:pipelines-ui": "npm run build && node scripts/check-pipelines-ui.mjs",
     "smoke:pipelines": "node scripts/smoke-pipelines.mjs",
     "pack": "npm run build && electron-builder --dir",
-    "dist": "npm run build && electron-builder --publish never"
+    "dist": "npm run build && electron-builder --publish never",
+    "cli": "node cli/index.mjs",
+    "pack:cli": "node scripts/build-cli-package.mjs",
+    "build:voice": "node scripts/build-voice.mjs"
   },
   "dependencies": {
     "@fontsource/ibm-plex-mono": "^5.2.7",
     "@fontsource/press-start-2p": "^5.3.0",
     "@fontsource/space-grotesk": "^5.2.10",
+    "ink": "^6.8.0",
     "lucide-react": "^0.468.0",
     "react": "19.2.0",
-    "react-dom": "19.2.0"
+    "react-dom": "19.2.0",
+    "string-width": "^8.3.0",
+    "strip-ansi": "^7.2.0"
   },
   "devDependencies": {
     "@types/react": "^19.2.0",
@@ -92,5 +98,8 @@
       "category": "Graphics"
     },
     "artifactName": "TIM-Studio-${version}-${os}-${arch}.${ext}"
+  },
+  "bin": {
+    "tim": "cli/index.mjs"
   }
 }
