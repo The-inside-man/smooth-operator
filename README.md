@@ -10,7 +10,7 @@ Contributions and bug reports are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.m
 
 ## Screenshots
 
-Interface previews use example data. The completed pipeline shows saved results from a real local run.
+Desktop interface previews use example data. The completed pipeline shows saved results from a real local run.
 
 **Local AI workspace** — chat with TIM, choose a capability, and open the model library or pipeline builder.
 
@@ -27,6 +27,16 @@ Interface previews use example data. The completed pipeline shows saved results 
 **Local execution** — inspect completed steps and delegated work from the five-step coding and review example.
 
 ![Completed local pipeline showing model loading, code generation, delegated review, and model unloading](docs/screenshots/pipeline-run.webp)
+
+The CLI images below show live output from an isolated local session, rendered with xterm.js rather than captured from a native terminal window.
+
+**CLI startup:** the welcome screen with a configured local model, workspace details, and command input.
+
+![TIM CLI startup screen with the TIM Studio artwork, selected local model, empty session, and command input](docs/screenshots/cli-startup.png)
+
+**CLI model selection:** open `/models` to browse installed and downloadable models, compare memory estimates, and review setup before downloading.
+
+![TIM CLI model selector with the installed Qwen3 0.6B model, Qwen3 8B highlighted, download sizes, memory estimates, and keyboard controls](docs/screenshots/cli-model-selection.png)
 
 ## Run on Windows, macOS, and Linux
 
