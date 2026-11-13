@@ -9,6 +9,7 @@ export const GENERATED_CODE_MAX_BYTES=1024*1024;
 const hash=source=>crypto.createHash('sha256').update(source).digest('hex');
 const languageFor=value=>({py:'python',python:'python',python3:'python',js:'javascript',javascript:'javascript',node:'javascript',nodejs:'javascript'})[String(value).toLowerCase()];
 const extensionFor=file=>({'.py':'python','.js':'javascript','.mjs':'javascript','.cjs':'javascript'})[path.extname(file).toLowerCase()];
+const launchPrefix=language=>language==='python'?['-X','utf8','-u']:[];
 const controls=/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]/;
 const inside=(base,file)=>file!==base&&!path.relative(base,file).startsWith('..'+path.sep)&&path.relative(base,file)!=='..'&&!path.isAbsolute(path.relative(base,file));
 const identity=stat=>Object.freeze({dev:String(stat.dev),ino:String(stat.ino)});
@@ -122,16 +123,26 @@ async function readSource(file){
   return {...sourceDetails(source),identity:identity(after)};
  }finally{await handle?.close();}
 }
-async function interpreter(language,{env=process.env,platform=process.platform,discover=discoverTools}={}){
+export async function findGeneratedPython({env=process.env,platform=process.platform,discover=discoverTools}={}){
+ const commands=platform==='win32'?['python3','python']:['python3'];
+ const tools=commands.map(command=>({id:'generated-python',name:'Python 3',command,platforms:['darwin','linux','win32'],interactive:false}));
+ if(platform==='win32'){
+  // App execution aliases can exist without an installed interpreter and open the Store.
+  const searchPath=String(env.PATH||env.Path||'').split(';').filter(folder=>path.win32.basename(folder).toLowerCase()!=='windowsapps').join(';');
+  env={...env,PATH:searchPath,Path:searchPath};
+ }
+ return (await discover(tools,{env,platform})).find(tool=>tool.status==='installed'&&tool.executable);
+}
+async function interpreter(language,discovery){
  if(language==='javascript')return {id:'generated-javascript',name:'JavaScript / Node.js',status:'installed',executable:process.execPath};
- const [tool]=await discover([{id:'generated-python',name:'Python 3',command:'python3',platforms:['darwin','linux','win32'],interactive:false}],{env,platform});
- if(tool?.status!=='installed'||!tool.executable)throw new Error('Python 3 was not found on PATH. Install Python 3, reopen TIM from that terminal, and review the run again. No package or interpreter was installed.');
+ const tool=await findGeneratedPython(discovery);
+ if(!tool)throw new Error('Python 3 was not found on PATH. Install Python 3, reopen TIM from that terminal, and review the run again. No package or interpreter was installed.');
  return tool;
 }
 async function makeRunReview(file,code,{cwd,args=[],timeoutMs=300000,...discovery}={}){
  if(!Array.isArray(args))throw new Error('Script arguments must be a literal argument array.');
  const tool=await interpreter(code.language,discovery);
- const review=makeReview({...tool,risk:'Generated code runs with your user privileges and inherited environment. It can read or change files, access the network, and open windows. Review the complete source before running.'},[...(code.language==='python'?['-u']:[]),file,...args],{cwd,timeoutMs});
+ const review=makeReview({...tool,risk:'Generated code runs with your user privileges and inherited environment. It can read or change files, access the network, and open windows. Review the complete source before running.'},[...launchPrefix(code.language),file,...args],{cwd,timeoutMs});
  return Object.freeze({...review,generatedCode:Object.freeze({file,language:code.language,source:code.source,sourceHash:code.sourceHash,bytes:code.bytes,identity:code.identity||null})});
 }
 export async function reviewGeneratedRun(file,{cwd=process.cwd(),...options}={}){
@@ -147,8 +158,8 @@ export async function reviewGeneratedRunFromSave(saveReview,{cwd=saveReview?.cwd
 export async function verifyGeneratedRun(review){
  if(!review?.generatedCode)return;
  const ref=review.generatedCode;
- const fileArgument=ref.language==='python'?1:0;
- if(!path.isAbsolute(ref.file||'')||review.args?.[fileArgument]!==ref.file||fileArgument&&review.args[0]!=='-u')throw new Error('The generated script launch target changed since review.');
+ const prefix=launchPrefix(ref.language);
+ if(!path.isAbsolute(ref.file||'')||review.args?.[prefix.length]!==ref.file||prefix.some((arg,index)=>review.args[index]!==arg))throw new Error('The generated script launch target changed since review.');
  const details=sourceDetails(ref.source);
  if(details.sourceHash!==ref.sourceHash||details.bytes!==ref.bytes)throw new Error('Generated source changed since review. Review it again before running.');
  const target=await resolveTarget(ref.file,{cwd:review.cwd,mustExist:true});

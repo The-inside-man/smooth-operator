@@ -11,7 +11,8 @@ import {setTimeout as delay} from 'node:timers/promises';
 import {render} from 'ink';
 import stringWidth from 'string-width';
 import {GeneratedCodeScreen} from '../cli/generated-code-screen.mjs';
-import {discoverTools,ToolRunner} from '../cli/tool-runner.mjs';
+import {ToolRunner} from '../cli/tool-runner.mjs';
+import {findGeneratedPython} from '../cli/generated-code.mjs';
 import {clean} from '../cli/core.mjs';
 import {mouseDisable,mouseEnable} from '../cli/mouse.mjs';
 
@@ -50,10 +51,10 @@ test('save-only confirmation creates the displayed source once without launching
 });
 
 test('one save-and-run approval shows exact execution details and actually runs harmless Python',async t=>{
- const [python]=await discoverTools([{id:'python',name:'Python 3',command:'python3',platforms:[process.platform]}]);if(python.status!=='installed'){t.skip('Python 3 is unavailable.');return;}
+ if(!await findGeneratedPython()){t.skip('A Python 3 executable is unavailable.');return;}
  const directory=await temporary(t),file=path.join(directory,'run.py');
  const app=await mount(t,{request:{kind:'save',message:message('import sys\nprint("SCREEN_PYTHON", sys.argv[1:])\n'),destination:file,cwd:directory,runAfter:true,args:['a b','; literal']}});
- assert.match(app.frame,/SAVE PYTHON AND RUN/);assert.match(app.frame,/Executable:/);assert.match(app.frame,/Arguments:.*-u/);assert.match(app.frame,/Working directory:/);assert.match(app.frame,/Timeout: 300s/);await absent(file);
+ assert.match(app.frame,/SAVE PYTHON AND RUN/);assert.match(app.frame,/Executable:/);assert.match(app.frame,/Arguments:.*"-X","utf8","-u"/);assert.match(app.frame,/Working directory:/);assert.match(app.frame,/Timeout: 300s/);await absent(file);
  await app.key('\x13');await waitFor(()=>/RUN \/ COMPLETED/.test(app.frame));assert.equal(app.saved.length,1);assert.match(app.frame,/SCREEN_PYTHON/);assert.match(app.frame,/a b/);assert.match(app.frame,/; literal/);assert.match(app.frame,/exit 0/);
 });
 

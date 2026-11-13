@@ -3,16 +3,16 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import {ToolRunner,discoverTools} from '../cli/tool-runner.mjs';
-import {extractGeneratedCode,reviewGeneratedSave,saveGeneratedCode,reviewGeneratedRun,reviewGeneratedRunFromSave,verifyGeneratedRun,runGeneratedCode,GENERATED_CODE_MAX_BYTES} from '../cli/generated-code.mjs';
+import {ToolRunner} from '../cli/tool-runner.mjs';
+import {extractGeneratedCode,reviewGeneratedSave,saveGeneratedCode,reviewGeneratedRun,reviewGeneratedRunFromSave,verifyGeneratedRun,runGeneratedCode,findGeneratedPython,GENERATED_CODE_MAX_BYTES} from '../cli/generated-code.mjs';
 
 const response=(source='print("HELLO GENERATED 界")\n',language='python')=>({role:'assistant',status:'completed',content:'Generated example:\n```'+language+'\n'+source+'```\n'});
 async function temporary(t){const directory=await fs.mkdtemp(path.join(os.tmpdir(),'tim-generated-test-'));t.after(()=>fs.rm(directory,{recursive:true,force:true}));return fs.realpath(directory);}
 const absent=async file=>assert.rejects(fs.stat(file),{code:'ENOENT'});
 const waitFor=async predicate=>{for(let i=0;i<150;i++){if(predicate())return;await new Promise(resolve=>setTimeout(resolve,10));}throw new Error('Fixture did not become ready.');};
 async function python(t){
- const [tool]=await discoverTools([{id:'python',name:'Python 3',command:'python3',platforms:[process.platform]}]);
- if(tool.status!=='installed'){t.skip('Python 3 is not installed in this test environment.');return null;}
+ const tool=await findGeneratedPython();
+ if(!tool){t.skip('A Python 3 executable is unavailable.');return null;}
  return tool;
 }
 
@@ -77,8 +77,24 @@ test('existing script review refuses binary, invalid UTF-8, oversized source, an
 test('save-and-run planning exposes exact interpreter/argv/cwd before the file exists without installing or launching',async t=>{
  const directory=await temporary(t),save=await reviewGeneratedSave(response(),'planned.py',{cwd:directory});let discoveries=0;
  const run=await reviewGeneratedRunFromSave(save,{args:['a b','; literal'],discover:async()=>{discoveries++;return [{id:'python',name:'Python 3',status:'installed',executable:process.execPath}];}});
- assert.equal(discoveries,1);assert.equal(run.executable,process.execPath);assert.deepEqual(run.args,['-u',save.destination,'a b','; literal']);assert.equal(run.cwd,directory);assert.equal(run.timeoutMs,300000);assert.equal(run.generatedCode.source,save.source);assert.ok(Object.isFrozen(run.generatedCode));await absent(save.destination);
+ assert.equal(discoveries,1);assert.equal(run.executable,process.execPath);assert.deepEqual(run.args,['-X','utf8','-u',save.destination,'a b','; literal']);assert.equal(run.cwd,directory);assert.equal(run.timeoutMs,300000);assert.equal(run.generatedCode.source,save.source);assert.ok(Object.isFrozen(run.generatedCode));await absent(save.destination);
+ await assert.rejects(verifyGeneratedRun({...run,args:['-X','utf8=0','-u',save.destination]}),/launch target changed/);
  await assert.rejects(reviewGeneratedRunFromSave(save,{discover:async()=>[]}),/Python 3 was not found/);await absent(save.destination);
+});
+
+test('Windows accepts python.exe and excludes the Microsoft Store alias directory',async()=>{
+ const executable='C:\\Python314\\python.exe';
+ const env={Path:'C:\\Users\\User\\AppData\\Local\\Microsoft\\WindowsApps\\;C:\\Python314'};
+ const tool=await findGeneratedPython({platform:'win32',env,discover:async(entries,options)=>{
+  assert.deepEqual(entries.map(entry=>entry.command),['python3','python']);
+  assert.equal(options.env.PATH,'C:\\Python314');assert.equal(options.env.Path,options.env.PATH);
+  return [{status:'not installed'},{status:'installed',executable}];
+ }});
+ assert.equal(tool.executable,executable);
+ const aliasOnly=await findGeneratedPython({platform:'win32',env:{PATH:'C:\\Users\\User\\AppData\\Local\\Microsoft\\WindowsApps'},discover:async(_entries,options)=>{
+  assert.equal(options.env.PATH,'');return [{status:'not installed'},{status:'not installed'}];
+ }});
+ assert.equal(aliasOnly,undefined);
 });
 
 test('changed source or replacement symlink is rejected before any process launches',async t=>{
@@ -96,7 +112,7 @@ test('harmless Python source actually saves and runs with literal arguments, std
  const directory=await temporary(t),source='import json, sys\nprint("PYTHON_FIXTURE 界", json.dumps(sys.argv[1:], ensure_ascii=False))\n',save=await reviewGeneratedSave(response(source),'actual.py',{cwd:directory});
  const review=await reviewGeneratedRunFromSave(save,{args:['a b','$(not-shell)',';literal']});await saveGeneratedCode(save,{confirmed:true});
  await assert.rejects(runGeneratedCode(review),/confirmation/);
- const result=await runGeneratedCode(review,{confirmed:true});assert.equal(result.status,'completed');assert.equal(result.exitCode,0);assert.match(result.stdout,/PYTHON_FIXTURE 界/);assert.match(result.stdout,/\$\(not-shell\)/);assert.match(result.stdout,/;literal/);
+ const result=await runGeneratedCode(review,{confirmed:true});assert.equal(result.status,'completed',result.error||result.stderr||`Exit ${result.exitCode}`);assert.equal(result.exitCode,0);assert.match(result.stdout,/PYTHON_FIXTURE 界/);assert.match(result.stdout,/\$\(not-shell\)/);assert.match(result.stdout,/;literal/);
  assert.equal(await fs.readFile(save.destination,'utf8'),source);
 });
 

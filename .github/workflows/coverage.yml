@@ -26,6 +26,11 @@ jobs:
       - name: Run tests and collect coverage
         run: |
           mkdir -p "$RUNNER_TEMP/tim-coverage"
+          # Invoke Node directly so the coverage flags precede the test files,
+          # while supplying the npm executable used by the installer fixtures.
+          npm_execpath="$(realpath "$(command -v npm)")"
+          test -f "$npm_execpath"
+          export npm_execpath
           node --test --test-timeout=120000 --experimental-test-coverage \
             --test-coverage-include='cli/**' \
             --test-coverage-include='server/**' \
