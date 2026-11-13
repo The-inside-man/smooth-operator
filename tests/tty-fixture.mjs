@@ -19,7 +19,11 @@ if(process.env.TIM_TEST_ERROR==='1'){
 setTimeout(()=>{process.stdout.columns=100;process.stdout.rows=24;process.stdout.emit('resize');},150).unref();
 // Portable handler coverage only: Windows OS termination never dispatches a
 // catchable SIGTERM. IPC lets tests exercise the registered JS cleanup handler.
-const dispatchSignal=message=>{if(message?.type==='dispatch-sigterm')process.emit('SIGTERM');};
-if(process.send)process.on('message',dispatchSignal);
+const dispatchFixtureMessage=message=>{
+ if(message?.type==='dispatch-sigterm')process.emit('SIGTERM');
+ // Let the parent resize after the composer has mounted, even on a slow start.
+ if(message?.type==='resize-terminal'){process.stdout.columns=80;process.stdout.rows=24;process.stdout.emit('resize');}
+};
+if(process.send)process.on('message',dispatchFixtureMessage);
 try{await import('../cli/index.mjs');}
-finally{process.off('message',dispatchSignal);if(process.connected)process.disconnect();await rm(dataDir,{recursive:true,force:true});}
+finally{process.off('message',dispatchFixtureMessage);if(process.connected)process.disconnect();await rm(dataDir,{recursive:true,force:true});}

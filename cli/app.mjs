@@ -79,7 +79,8 @@ export function App({client,demo=false,onQuit,initial=demoState,staticPreview=fa
   setNotice(`Local model ready: ${model.name}. ${draft.text?'Your request is ready; press Enter to send.':'Enter a request below.'}`);
  }
  async function cancel(){if(naturalController.current){naturalController.current.abort();setNotice('Cancelling current plan/action; draft retained.');return;}if(demo){setNotice('SAMPLE DATA / no running job');return;}try{const current=active||(pending.current&&(await client.request('state')).jobs.find(j=>j.requestId===pending.current.id));if(!current){setNotice('No accepted job found; draft retained.');return;}await client.request('cancel',{id:current.id});setNotice('Cancellation requested');}catch(e){setNotice(e.message);}}
- async function submit(){const currentDraft=getDraft();if(submitting.current||busy||!currentDraft.text.trim())return;submitting.current=true;const original=currentDraft.text,input=currentDraft.text.trim();let acceptedScope=recallScope;setBusy(true);try{
+ // The ref owns admission; a just-rendered error can precede Ink's handler refresh.
+ async function submit(){const currentDraft=getDraft();if(submitting.current||!currentDraft.text.trim())return;submitting.current=true;const original=currentDraft.text,input=currentDraft.text.trim();let acceptedScope=recallScope;setBusy(true);try{
   const commandInput=input.startsWith('/')&&help.split(/\s+/).includes(input.split(/\s+/)[0]);
   if(!commandInput&&!demo&&!cloud&&client){
    const id=naturalMode||input.startsWith('/')?selected.modelId||state.loadedModelId||state.config?.mainAgentModelId:mode==='agent'?state.config?.mainAgentModelId:modelId;
