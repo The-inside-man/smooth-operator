@@ -9,7 +9,7 @@ import {controlCommand} from '../cli/control-command.mjs';
 
 test('real CLI routes prerequisite version, disabled control and Tor guards without a backend',()=>{
  const run=args=>spawnSync(process.execPath,['cli/index.mjs',...args],{encoding:'utf8',timeout:10000,env:{...process.env,TIM_PROVIDER:'local',TIM_MODEL:''}});
- let r=run(['dependencies','node','--version','invalid']);assert.equal(r.status,1);assert.match(r.stderr,/explicit supported Node version/);assert.doesNotMatch(r.stdout,/TIM Studio 0.1.0/);
+ let r=run(['dependencies','node','--version','invalid']);assert.equal(r.status,1);assert.match(r.stderr,/explicit supported Node version/);assert.doesNotMatch(r.stdout,/TIM Studio \d+\.\d+\.\d+/);
  r=run(['dependencies','list']);assert.equal(r.status,0);assert.match(r.stdout,/Tor client/);
  r=run(['control','--plan','unread.json']);assert.equal(r.status,1);assert.match(r.stderr,/interactive approval/);
  r=run(['voice','--adapter','relative.exe']);assert.equal(r.status,1);assert.match(r.stderr,/absolute executable/);

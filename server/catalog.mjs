@@ -3,6 +3,7 @@
 // memoryGB is a conservative planning estimate at short context, not a hardware guarantee.
 // Qwen3's default uses Unsloth's quantization of the Apache-2.0 Qwen model.
 import { imageCatalogModels } from './image-catalog.mjs';
+import { gemmaCatalogModels } from './gemma-catalog.mjs';
 
 export const catalogModels = Object.freeze([
   {
@@ -614,6 +615,7 @@ export const catalogModels = Object.freeze([
       }
     ]
   },
+  ...gemmaCatalogModels,
   ...imageCatalogModels,
   {
     "id": "dreamshaper-8",

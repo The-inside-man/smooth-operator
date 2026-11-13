@@ -172,7 +172,7 @@ for(const mode of ['chat','code'])test(`choosing a download in /models preserves
    await app.key('\x1b');await app.key('/mode code');await app.key('\r');
    await app.key(request);assert.match(await app.key('\r'),/TIM \/ MODELS/);
   }
-  assert.match(app.output,/15 chat models \/ 1 available \/ 14 downloadable/);assert.match(app.output,/Qwen3 4B.*download/);
+  assert.ok(app.output.includes(`${catalog.length} chat models / 1 available / ${catalog.length-1} downloadable`));assert.match(app.output,/Qwen3 4B.*download/);
   await app.key(targetNumber);const review=await app.key('\r');assert.match(review,/REVIEW \/ Qwen3 4B/);
   assert.match(review,/Enter start setup/);assert.doesNotMatch(review,/Number \+ Enter review/,'download selection opens its review directly');
   assert.equal(app.calls.filter(call=>call.route==='setup').length,0);assert.equal(app.calls.filter(call=>call.route==='jobs').length,0);

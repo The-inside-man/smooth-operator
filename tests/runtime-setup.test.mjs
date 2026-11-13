@@ -42,11 +42,33 @@ test('an existing managed runtime is reused without downloading an archive', asy
   const binary = path.join(runtimeDir, 'llama-server' + (process.platform === 'win32' ? '.exe' : ''));
   await fs.mkdir(runtimeDir, { recursive: true }); await fs.writeFile(binary, 'fixture');
   const result = await ensureChatRuntime(dir, null, {
+    managedOnly: true,
     fetchImpl: async () => { assert.fail('An installed runtime must not trigger a network request'); },
     onChange: phase => phases.push(phase)
   });
   assert.deepEqual(result, { binary, backend: 'cpu' });
   assert.deepEqual(phases, [{ status: 'ready', progress: 100 }]);
+});
+
+test('managed-only setup requires an engine in app data even when external engines exist', async t => {
+  const dir = await fixture(t);
+  const name = process.platform === 'win32' ? 'llama-server.exe' : 'llama-server';
+  const pathBinary = path.join(dir, name);
+  const library = path.join(dir, 'library');
+  const libraryRuntime = path.join(library, 'TIM-Studio', 'runtimes', `${process.platform}-${process.arch}`, 'chat', 'cpu');
+  await fs.mkdir(libraryRuntime, { recursive: true });
+  await fs.writeFile(path.join(libraryRuntime, name), 'library fixture');
+  await fs.writeFile(pathBinary, 'PATH fixture', { mode: 0o755 });
+  const noDownload = () => assert.fail('Existing external engines remain valid outside managed-only setup');
+  assert.equal((await ensureChatRuntime(dir, library, { fetchImpl: noDownload })).binary, path.join(libraryRuntime, name));
+  assert.equal((await ensureChatRuntime(dir, null, { fetchImpl: noDownload })).binary, pathBinary);
+  await assert.rejects(ensureChatRuntime(dir, library, {
+    managedOnly: true,
+    fetchImpl: url => {
+      assert.match(url, /^https:\/\/github\.com\/ggml-org\/llama\.cpp\/releases\/download\//);
+      throw new Error('Pinned managed runtime requested');
+    }
+  }), /Pinned managed runtime requested/);
 });
 
 test('invalid runtime bytes are removed and never installed', async t => {

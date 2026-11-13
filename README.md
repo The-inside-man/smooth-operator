@@ -1,5 +1,7 @@
 # TIM Studio
 
+[![GitHub release](https://img.shields.io/github/v/release/The-inside-man/smooth-operator?include_prereleases=true&label=release)](https://github.com/The-inside-man/smooth-operator/releases) [![Desktop CI on main](https://github.com/The-inside-man/smooth-operator/actions/workflows/desktop.yml/badge.svg?branch=main&event=push)](https://github.com/The-inside-man/smooth-operator/actions/workflows/desktop.yml?query=branch%3Amain) [![JavaScript line coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2FThe-inside-man%2Fsmooth-operator%2Fcoverage-badge%2Fcoverage.json)](https://github.com/The-inside-man/smooth-operator/actions/workflows/coverage.yml?query=branch%3Amain) [![MIT license](https://img.shields.io/github/license/The-inside-man/smooth-operator)](LICENSE)
+
 A local AI workspace for downloading models, running agents, and building visual pipelines on your own machine. Chat with a resident guide, choose specialist models, and inspect each step as a workflow runs.
 
 TIM Studio is a desktop alpha for **Windows, macOS, and Linux**. Models can be downloaded into its local data folder or referenced in place from an existing TIM library. Once the required models and engines are installed, inference runs locally.
@@ -7,6 +9,19 @@ TIM Studio is a desktop alpha for **Windows, macOS, and Linux**. Models can be d
 See the [changelog](CHANGELOG.md) for recent features, fixes, and validation limits.
 
 Contributions and bug reports are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) for setup, checks, model recipes, and the pull request process.
+
+## Install TIM Studio
+
+Look for **TIM Studio Installer** for your operating system and processor in the [GitHub release assets](https://github.com/The-inside-man/smooth-operator/releases). On Windows or macOS, extract the ZIP and open the installer. On Linux, allow the AppImage to run as a program in its file properties and open it. The Linux desktop needs AppImage support.
+
+1. Check **TIM Desktop**, **TIM CLI**, or both. The installer includes the application runtimes and the CLI dependencies.
+2. Choose starter models or skip this step. The wizard shows available memory, recommends chat models with room to run, and lists the download size and estimated RAM for each model. Selecting a chat model also sets up the local chat engine. Image and speech models may need their own engines configured in TIM.
+3. Choose **Install on this computer** or **Run from an external drive**, then browse to a destination. Review the required space and free space before installing. For macOS Desktop on an external drive, use a Mac-formatted volume such as APFS.
+4. Click **Install TIM Studio**. Starter models download and verify during setup. If a download stops, retry in the same folder. When setup finishes, open the desktop or terminal app from the wizard or the new `TIM Studio` folder.
+
+The external-drive option keeps the selected apps, models, and settings in one folder. Keep the folder together and use it on a machine with the same OS and architecture. Close TIM before ejecting the drive. Desktop and Terminal use the same data, so close one before switching to the other. Multiple CLI windows can share a terminal backend.
+
+To upgrade a wizard installation, choose its folder or its parent in the new installer. The review shows the installed and bundled versions. An upgrade replaces the app components and keeps their shared data. If the wizard detects an older standalone install, you can copy its data into a new wizard installation. The original app and data stay in their existing locations.
 
 ## Screenshots
 
@@ -82,6 +97,8 @@ In the command box, **Up/Down** recall older/newer requests and commands without
 
 Two-finger trackpad and wheel scrolling work when your terminal forwards mouse reports; full-screen TIM enables them by default and follows macOS natural-scrolling direction. In Apple Terminal, check **View → Allow Mouse Reporting** ([Apple instructions](https://support.apple.com/guide/terminal/turn-on-mouse-reporting-trmlc69728a5/mac)); in iTerm2, enable **Profiles → Terminal → Enable mouse reporting** and **Report mouse wheel events** ([iTerm2 settings](https://iterm2.com/documentation-preferences-profiles-terminal.html)). Run **`tim --no-mouse`** to use the terminal's own text selection and scrollback controls. The keyboard shortcuts still work.
 
+Use **`/copy`** for the latest completed reply or **`/copy code`** for its complete code blocks. **`/select`** or **F2** pauses the display and releases mouse reporting for native text selection; on Mac, select and use Command+C. Esc or F2 resumes; model work continues. **`/save "my chart.py" --run`** reviews generated source, a new destination and the exact command before **Ctrl+S** saves and runs it. Omit `--run` to save only; `--block N` selects among code blocks. **`/run PATH [ARGS...]`** reviews an existing Python or JavaScript script; `/run` alone uses the last saved file. You can ask “Write a Python script, save it as chart.py and run it” to open that same review after generation. TIM never overwrites an existing file or installs dependencies automatically. Scripts run with your user privileges, have a five-minute limit and can be cancelled with Esc; a Matplotlib window may need closing to finish. See [the code-file workflow](CLI.md#copy-replies-and-save-or-run-code).
+
 Each guide links to the provider's API key page, shows how to set the key privately in your terminal, and gives the model-list and launch commands. Inside TIM, `/providers` opens the guides; P opens them from the model chooser. After setting the key, run `tim models --provider PROVIDER`, then `tim --provider PROVIDER --model MODEL_ID` with an exact text-model ID from your account's list. The CLI offers cloud text chat/code and typed tool planning; the desktop's media and pipelines use local models.
 
 TIM uses model APIs: a ChatGPT, Grok or Claude app login does not automatically sign TIM in. Configure API access, billing and credits in the provider account; subscription benefits vary by provider and plan. The keys are `OPENAI_API_KEY`, `XAI_API_KEY` and `ANTHROPIC_API_KEY`, respectively. Keep them out of the TIM prompt. See the [step-by-step terminal instructions](CLI.md#connect-chatgpt-grok-or-claude-from-the-terminal), [OpenAI authentication](https://developers.openai.com/api/reference/overview), [xAI quickstart](https://docs.x.ai/developers/quickstart), and [Claude API key guide](https://platform.claude.com/docs/en/get-api-key).
@@ -129,7 +146,19 @@ Automated validation uses mocked model responses and temporary local fixtures. A
 
 ## Browse, download and load models
 
-Model Library includes an offline catalog of **31 models**: five Qwen3 assistants, ten Qwen2.5 general/chat and coding assistants, seven Whisper speech-to-text variants, and nine image choices. Each entry describes its best uses, quantization, total download size, estimated memory, license and source. **Photorealism** and **Identity & editing** filters help choose image models. The catalog is curated and bundled with the app; it is not a live search of every model online.
+Model Library includes an offline catalog of **36 models**: five Qwen3 assistants, ten Qwen2.5 chat and coding assistants, five Gemma 4 assistants, seven Whisper speech-to-text variants, and nine image choices. Each entry shows its uses, quantization, download size, estimated memory, license and source. Use **Photorealism** and **Identity & editing** to filter image models.
+
+Search **Gemma 4** in desktop **Model Library** or open **`/models`** in TIM's terminal. Both list Google's Q4_0 GGUFs for local text chat and coding. The downloads use Apache 2.0 and need a Gemma 4-compatible llama.cpp engine. TIM's automatic engine setup supplies a compatible build. If you use an older external engine, update it before loading Gemma 4. [Google's Gemma 4 guide](https://gemma.ai/deployment/llamacpp/)
+
+| Gemma 4 model | Download | Estimated RAM at short context |
+| --- | ---: | ---: |
+| E2B | 3.1 GiB | 5 GiB |
+| E4B | 4.8 GiB | 8 GiB |
+| 12B | 6.5 GiB | 11 GiB |
+| 26B A4B | 13.4 GiB | 19 GiB |
+| 31B | 16.4 GiB | 23 GiB |
+
+Estimates exclude system headroom and other loaded models. The 26B A4B loads the full weights even though it activates about 4B parameters per token. Longer context can increase memory use.
 
 The image choices include:
 
@@ -300,11 +329,11 @@ React, Electron, Vite, Lucide, Fontsource fonts, and their dependencies retain t
 References: [Electron installation](https://www.electronjs.org/docs/latest/tutorial/installation), [Electron process isolation](https://www.electronjs.org/docs/latest/tutorial/security), [GitHub native runner targets](https://docs.github.com/en/actions/reference/runners/github-hosted-runners).
 ## Terminal Setup (Full-Screen Terminal)
 
-TIM Studio also installs as an independent terminal application, with no graphical frontend or manual server startup:
+TIM Studio also installs as an independent terminal application. When available in the [release assets](https://github.com/The-inside-man/smooth-operator/releases), download and extract `TIM-Studio-CLI-Installer.zip`. Keep its files together and follow the [installer instructions](CLI.md#user-level-installer-windows-macos-and-linux). For a source build:
 
 ```sh
 npm run pack:cli
-npm install -g ./artifacts/tim-studio-cli-0.1.0.tgz
+npm install -g ./artifacts/tim-studio-cli-0.1.1-alpha.2.tgz
 tim
 ```
 
@@ -312,7 +341,7 @@ For source development use `npm run cli`, `npm run cli -- --demo` or `npm run cl
 
 Use `/models` to see installed models alongside the full supported chat/code download catalog, including larger Qwen models. Several **[SUGGESTED]** entries use available system memory to help you choose. Enter selects an installed model or reviews a download; a second Enter confirms setup of that exact model. `/model N` and `/agent N` match the displayed row numbers. `tim setup` and **S** in the chooser open the dedicated local setup browser; **P** opens cloud setup instructions. `tim providers openai`, `tim providers xai`, and `tim providers anthropic` explain how to use OpenAI, Grok, or Claude with API keys and model IDs from your account. Your typed request is preserved through local setup and model selection.
 
-Use Up/Down in the command box to recall requests or commands, then Enter separately to rerun. Down past the latest restores your draft. Use two-finger trackpad scrolling when mouse reporting is allowed by your terminal, or Ctrl+P/Ctrl+N for earlier/later pages and Ctrl+L for the latest reply. On Mac, the shortcuts use Control, not Command. `tim --no-mouse` leaves selection and scrollback gestures with the terminal. See [CLI.md](CLI.md) for keyboard controls, package-manager support, `tim install`, local listeners, offline PCAP inspection, user-selected toolbox storage and exact limitations. All system actions require explicit review. Model proposals never become arbitrary shell commands. No models or packages are installed on startup.
+Use Up/Down in the command box to recall requests or commands, then Enter separately to rerun. Down past the latest restores your draft. Use two-finger trackpad scrolling when mouse reporting is allowed by your terminal, or Ctrl+P/Ctrl+N for earlier/later pages and Ctrl+L for the latest reply. On Mac, the shortcuts use Control, not Command. `/select` or F2 pauses display updates and releases mouse reporting for selection; Esc or F2 resumes. `tim --no-mouse` also leaves selection with the terminal. `/copy` copies a completed reply, `/save PATH [--run]` reviews generated source and a new destination, and `/run PATH` reviews an existing script. Ctrl+S confirms the reviewed file/command once. See [CLI.md](CLI.md) for these controls, package managers, listeners, offline captures, toolbox storage and limits. Model text never executes automatically. No models or packages are installed on startup.
 
 `npm test` covers protocol, editor, responsive renders, local process/socket fixtures, planner validation and synthetic-terminal cleanup. `node scripts/preview-cli.mjs` produces the color-faithful Ink component preview using Edge; it is not native terminal QA.
 

@@ -4,10 +4,12 @@ TIM is a full-screen terminal application with responsive pixel-art branding, mu
 
 ## Install and start
 
-From the corrected supplied archive:
+The [TIM Studio setup wizard](README.md#install-tim-studio) can install the terminal app with its own Node.js runtime. Check **TIM CLI** in the wizard. Open the installed launcher from the chosen `TIM Studio` folder, or choose **Open TIM CLI** when setup finishes.
+
+Download `TIM-Studio-CLI-Installer.zip` from the [GitHub release assets](https://github.com/The-inside-man/smooth-operator/releases) when available, or run `npm run pack:cli` from a source checkout. See the [user-level installer](#user-level-installer-windows-macos-and-linux) for the platform commands. With the CLI tarball in your working directory, you can also install using npm:
 
 ```sh
-npm install -g ./tim-studio-cli-0.1.0.tgz
+npm install -g ./tim-studio-cli-0.1.1-alpha.2.tgz
 tim
 ```
 
@@ -25,6 +27,8 @@ tim --url http://127.0.0.1:PORT
 ```
 
 Normal startup owns an ephemeral loopback-only backend and closes it on exit. `--url` attaches to an existing backend without stopping it. After a crash, inspect a stale `cli.lock` before manually removing it. Models are not downloaded or run on startup. If no usable model is selected, TIM opens the model chooser. `/models` reopens this same chooser: installed chat models appear first, followed by supported catalog models available to download. Rows identify the current model, installed models and downloads; download size, memory estimates and suggestions help you choose. Use Up/Down or a model number, then Enter. An installed available model is selected immediately; a downloadable model opens its setup review, and a second Enter confirms the download. Esc returns to your draft. Your request stays ready for a separate Enter to send after model selection or setup. Press **S** to browse local setup or **P** for cloud connection instructions; Ctrl+R refreshes the catalog and memory reading. `--demo` is sample data. Noninteractive use prints guidance and never silently approves an action.
+
+The catalog includes Gemma 4 E2B, E4B, 12B, 26B A4B and 31B for local text chat and coding. Check the download size and RAM estimate before confirming. If a previously installed engine rejects the model, use a Gemma 4-compatible llama.cpp build. [Google's llama.cpp guide](https://gemma.ai/deployment/llamacpp/)
 
 `/model N` and `/agent N` use the same numbered rows shown by `/models`, including installed imports and downloadable catalog models. An available installed row selects immediately. A downloadable row opens review for that exact model before confirmation. `/model N` selects Chat and keeps your main agent; `/agent N` changes the main agent. Choosing a model directly in `/models` keeps your current Agent, Chat or Code mode, including when a download is needed. Chat and Code downloads keep the existing main agent too; standalone `tim setup` and `/setup` prepare an Agent model.
 
@@ -47,6 +51,26 @@ To review a long reply, press **Ctrl+P** for the previous page and **Ctrl+N** fo
 Two-finger trackpad scrolling and the mouse wheel scroll TIM's content when the terminal forwards mouse reports. Full-screen TIM enables reporting by default. In **Apple Terminal**, check **View → Allow Mouse Reporting**; the terminal must allow reporting as well as TIM requesting it. See [Apple's mouse-reporting instructions](https://support.apple.com/guide/terminal/turn-on-mouse-reporting-trmlc69728a5/mac). In **iTerm2**, enable **Profiles → Terminal → Enable mouse reporting** and **Report mouse wheel events**. See [iTerm2's terminal profile settings](https://iterm2.com/documentation-preferences-profiles-terminal.html).
 
 TIM follows the scroll direction your terminal reports, respecting macOS natural scrolling without adding an inversion. To use the terminal's own text selection and scrollback controls instead, launch **`tim --no-mouse`**. Ctrl+P/Ctrl+N/Ctrl+L remain available with mouse reporting disabled.
+
+### Copy replies and save or run code
+
+Enter **`/copy`** to copy the latest assistant response, including useful partial text, or **`/copy code`** to copy its complete fenced code blocks, separated by blank lines. Enter **`/select`** or press **F2** to pause the displayed reply and disable mouse reporting for your terminal's normal text selection. On Mac, select the text and use **Command+C** to copy. Press **Esc** or **F2** to resume; model work continues while the display is paused. `tim --no-mouse` also leaves selection with the terminal.
+
+To turn a generated code block into a file, enter:
+
+```text
+/save "my chart.py"
+/save "my chart.py" --run
+/save result.mjs --block 2
+/run "my chart.py" --count 5
+/run
+```
+
+`/save` opens a review of the complete source and destination. Use `--block N` to choose among multiple supported code blocks, starting at 1. `--run` includes the interpreter, arguments, working directory and timeout in the same review. **Ctrl+S** confirms that exact save or save-and-run once. Existing files are never overwritten; choose an existing destination folder and a new filename. `/run PATH [ARGS...]` reviews an existing script and its source; `/run` alone uses the last file saved during this CLI run. Paths containing spaces need quotes. Arguments are literal: TIM does not evaluate shell substitutions, pipes or redirects. Source is checked again before launch.
+
+You can also ask, **“Write a Python script that plots a sine wave, save it as chart.py and run it.”** A clear file or run request opens the review after generation finishes. **“Save this code as chart.py”** reviews the latest completed code, and **“Run chart.py”** reviews that file. Ordinary code questions remain conversation; printed code alone does not create a file or run a program. “Do not run” keeps execution out of a generated-file request.
+
+Python requires an installed Python 3 interpreter; JavaScript uses TIM's Node.js runtime. TIM does not install missing dependencies automatically. Reviewed scripts run with your user privileges and inherited environment, can access files/network, and have a five-minute limit with closed stdin and bounded output. They are not sandboxed. A Matplotlib plot window may keep Python running until you close it; **Esc** cancels the owned process tree. Cancellation cannot undo effects that already occurred. For a file-only chart, ask for a script that saves the figure instead of opening a window. See [Matplotlib's display behavior](https://matplotlib.org/stable/api/_as_gen/matplotlib.pyplot.show.html).
 
 ### Model memory and unloading
 
@@ -208,13 +232,13 @@ tim toolbox add ./updated.mjs "reason for revision" --id TOOL-ID
 
 Commands accept `--toolbox DIRECTORY` for an explicit one-time root. Selection persists in ordinary TIM configuration; `--data-dir` isolates that configuration. The directory must exist and be writable. No default is silently selected, unavailable drives fail without fallback, and changing location never migrates/deletes old tools. Selection is a command, not an interactive setup wizard.
 
-All executable-tool proposal paths share recall before generation: `toolbox propose` and the install screen's Ctrl+B fallback. Compatible keyword matches are returned before a model is called. Otherwise the configured model may produce a bounded JavaScript draft. The low-level build planner refuses calls that bypass this recall gate. Ordinary chat/specialist text has no script creation/execution capability; code printed in conversation is not a saved or approved tool.
+Persistent toolbox proposal paths share recall before generation: `toolbox propose` and the install screen's Ctrl+B fallback. Compatible keyword matches are returned before a model is called. Otherwise the configured model may produce a bounded JavaScript draft. The low-level build planner refuses calls that bypass this recall gate. Code printed in conversation is not a saved or approved toolbox entry. The separate `/save` and `/run` workflow above uses a fresh source/file/command review for a standalone script.
 
 Drafts record stable ID/version, name/description, timestamps, request/rationale, tags, runtime/platform/dependencies, entry point/argv schema, permissions/network scope, model provenance, source hash, review state, validation notes and bounded status-only outcome history. They never store packet payloads or execution output. Do not put secrets in requests or source; automatic secret redaction is not provided.
 
 Show and inspect source before running. Each run needs fresh exact-command approval. Source hash and permission/compatibility metadata are rechecked against that approval. Changed source must become a new version; corrupted entries are reported and not executed. Draft versions and execution audit updates use a shared exclusive lock and atomic writes, with a bounded wait. A stale lock produces an error instead of silent overwrite; investigate the prior writer before manually removing it.
 
-Execution currently supports Node ES modules without declared external dependencies. Compatibility uses declared metadata, not static analysis. Code is not sandboxed, and 'reviewed' is not a security or test certification. Other runtimes, dependency repair, semantic recall and automatic migration are unsupported.
+Persistent toolbox execution supports Node ES modules without declared external dependencies. Compatibility uses declared metadata, not static analysis. Code is not sandboxed, and 'reviewed' is not a security or test certification. Other toolbox runtimes, dependency repair, semantic recall and automatic migration are unsupported. Standalone Python and JavaScript files use the separate reviewed `/save` and `/run` workflow.
 
 ## Validation and remaining limits
 
@@ -224,11 +248,7 @@ Preview images rasterize actual Ink output with ANSI colors and fixed-cell block
 
 ## User-level installer (Windows, macOS and Linux)
 
-`npm.cmd run pack:cli` on Windows (`npm run pack:cli` on Unix) creates `artifacts/tim-studio-installer/`: keep all files in
-that folder together. It contains the verified package, SHA-256 manifest, common
-installer engine and platform scripts. No published npm package or release URL
-is assumed. Obtain the whole folder from a trusted distributor; the adjacent
-checksum detects corruption, not a malicious replacement of the whole bundle.
+Extract `TIM-Studio-CLI-Installer.zip` from the [GitHub release assets](https://github.com/The-inside-man/smooth-operator/releases) when available. To build the same bundle from source, run `npm.cmd run pack:cli` on Windows or `npm run pack:cli` on Unix. The source build creates `artifacts/tim-studio-installer/`. Keep the CLI tarball, SHA-256 manifest, installer engine and platform scripts together.
 
 Install Node.js 24 or newer **with npm** from https://nodejs.org/en/download first.
 The scripts check prerequisites and give instructions if unavailable; they never

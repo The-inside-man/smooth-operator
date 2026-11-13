@@ -1,4 +1,12 @@
-## Unreleased - 2026-10-31
+# Changelog
+
+## 0.1.1-alpha.2 — pending release
+
+- Compare installed and bundled versions in the wizard. Upgrade previously installed components in place, block downgrades, and offer to copy data from detected standalone TIM installs into a new wizard installation.
+- Add a graphical setup wizard for Desktop, Terminal, and starter models. Review hardware-based model suggestions and disk space, install locally or to an external drive, and open either app when setup finishes.
+- Package the standalone TIM terminal installer alongside the desktop builds. The CLI supports model selection, cloud provider setup, scroll and history controls, response and context settings, model memory controls, copying replies, and reviewed Python and JavaScript save and run commands.
+- Add Google's five Gemma 4 Q4_0 downloads to the desktop Model Library and terminal model picker. TIM uses the text weights for chat and coding.
+- Repair terminal and queue test fixtures. Update the Apple Silicon runner while retaining its required GitHub check name.
 
 ## Unreleased — CLI usability, actions and opt-in adapters
 
@@ -13,8 +21,6 @@
 - Add explicit OpenAI/xAI Responses text streaming and strict-schema CLI planning, dynamic model discovery, provider boundaries and safe error reporting. No credentials are stored and no provider fallback is automatic.
 - Show observed phases, elapsed/last-activity time and conservative historical ETA ranges after sufficient comparable samples; separate UI clocks from backend/provider events. Add reconnect, reviewed retry and idempotent chat submissions.
 - Validate with mocked cloud HTTP/SSE, dummy keys and isolated local fixtures; live vendor/account behavior is not certified.
-
-# Changelog
 
 ## Unreleased - TIM terminal workspace
 

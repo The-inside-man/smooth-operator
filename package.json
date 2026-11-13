@@ -1,6 +1,6 @@
 {
   "name": "tim-studio",
-  "version": "0.1.0",
+  "version": "0.1.1-alpha.2",
   "description": "A portable, offline multimedia AI workbench",
   "author": "TIM Studio",
   "license": "MIT",
@@ -25,6 +25,7 @@
     "dist": "npm run build && electron-builder --publish never",
     "cli": "node cli/index.mjs",
     "pack:cli": "node scripts/build-cli-package.mjs",
+    "pack:installer": "node scripts/build-installer.mjs",
     "build:voice": "node scripts/build-voice.mjs"
   },
   "dependencies": {

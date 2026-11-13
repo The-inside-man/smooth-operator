@@ -5,6 +5,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   build:
+    name: build (${{ matrix.check_os || matrix.os }}, ${{ matrix.target }}, ${{ matrix.args }})
     timeout-minutes: 20
     strategy:
       fail-fast: false
@@ -14,6 +15,7 @@ jobs:
             target: win-x64
             args: --win --x64
           - os: macos-15
+            check_os: macos-14 # Keep the required status check name.
             target: mac-arm64
             args: --mac --arm64
           - os: macos-15-intel
@@ -48,3 +50,39 @@ jobs:
           path: |
             release/*.zip
             release/*.AppImage
+      - name: Build the desktop and terminal installer
+        run: npm run pack:installer
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TIM-Studio-Installer-${{ matrix.target }}
+          path: |
+            release-installer/TIM-Studio-Installer-*.zip
+            release-installer/TIM-Studio-Installer-*.AppImage
+          if-no-files-found: error
+
+  package-cli:
+    name: Package CLI installer
+    # Build on Windows so the packer can compile the optional native adapters.
+    runs-on: windows-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm run pack:cli
+      - name: Create the installer ZIP
+        shell: pwsh
+        run: |
+          Compress-Archive -Path artifacts/tim-studio-installer/* -DestinationPath artifacts/TIM-Studio-CLI-Installer.zip
+      - uses: actions/upload-artifact@v7
+        with:
+          path: artifacts/TIM-Studio-CLI-Installer.zip
+          archive: false
+          if-no-files-found: error

@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'">
+  <title>TIM Studio Setup</title>
+  <link rel="stylesheet" href="./wizard.css">
+  <script src="./wizard.js" defer></script>
+</head>
+<body>
+  <div class="shell">
+    <header class="masthead">
+      <div class="brand">
+        <svg aria-hidden="true" viewBox="0 0 40 40" width="40" height="40">
+          <path fill="currentColor" d="M3 3h27l7 7v27H3z"/>
+          <path fill="#111c1a" d="M9 12h22v4h-9v12h-4V16H9zm0 18h22v3H9z"/>
+        </svg>
+        <div><b>TIM Studio</b><span>SETUP</span></div>
+      </div>
+      <span class="version" id="version" hidden></span>
+    </header>
+    <div class="workspace">
+      <aside class="rail" aria-label="Setup steps">
+        <p class="rail-label">INSTALLATION</p>
+        <ol class="steps">
+          <li data-step="1" aria-current="step"><span class="step-no" aria-hidden="true">01</span><span>Components</span></li>
+          <li data-step="2"><span class="step-no" aria-hidden="true">02</span><span>Models</span></li>
+          <li data-step="3"><span class="step-no" aria-hidden="true">03</span><span>Destination</span></li>
+          <li data-step="4"><span class="step-no" aria-hidden="true">04</span><span>Install</span></li>
+        </ol>
+      </aside>
+      <main class="main">
+        <div class="notice error" id="message" role="alert" hidden></div>
+        <section id="step-1" aria-labelledby="heading-1">
+          <h1 id="heading-1" tabindex="-1">Choose what to install</h1>
+          <p class="intro">Set up the desktop workspace, the terminal app, or both.</p>
+          <p class="notice" id="loading" role="status">Checking this machine and the installer package…</p>
+          <div id="components" hidden>
+            <div class="notice" id="existing-installation" hidden>
+              <strong id="existing-version"></strong>
+              <p class="path" id="existing-target"></p>
+            </div>
+            <div class="notice" id="other-installations" hidden>
+              <strong>Other TIM installations found</strong>
+              <ul id="other-installation-paths" class="issues"></ul>
+              <p class="quiet">These apps were installed separately. The wizard leaves them in place. When setting up a new folder, you can choose to copy their data.</p>
+            </div>
+            <fieldset>
+              <legend class="sr-only">TIM Studio applications</legend>
+              <div class="choice-grid">
+                <label class="choice">
+                  <input id="desktop" type="checkbox" aria-describedby="desktop-description desktop-note">
+                  <span class="choice-body">
+                    <strong>TIM Desktop</strong>
+                    <span id="desktop-description">Chat with local models and build visual workflows.</span>
+                    <small id="desktop-note" hidden>Unavailable in this installer.</small>
+                  </span>
+                </label>
+                <label class="choice">
+                  <input id="cli" type="checkbox" aria-describedby="cli-description cli-note">
+                  <span class="choice-body">
+                    <strong>TIM CLI</strong>
+                    <span id="cli-description">Work with local models in your terminal.</span>
+                    <small id="cli-note" hidden>Unavailable in this installer.</small>
+                  </span>
+                </label>
+              </div>
+            </fieldset>
+            <div class="panel hardware">
+              <h2>This machine</h2>
+              <dl id="hardware"></dl>
+            </div>
+          </div>
+        </section>
+
+        <section id="step-2" aria-labelledby="heading-2" hidden>
+          <h1 id="heading-2" tabindex="-1">Pick your starter models</h1>
+          <p class="intro">Download models now, or add them later in TIM. Setup needs an internet connection for model downloads; inference can run locally.</p>
+          <p class="notice" id="model-fit" hidden></p>
+          <fieldset>
+            <legend class="sr-only">Starter models to download</legend>
+            <label class="filter" id="filter-row" hidden>Show models
+              <select id="model-category"><option value="">All categories</option></select>
+            </label>
+            <div class="models" id="models"></div>
+          </fieldset>
+          <div class="model-total">
+            <span id="model-total" role="status">No starter models selected.</span>
+            <span>Memory estimates are per model and vary with use.</span>
+          </div>
+        </section>
+
+        <section id="step-3" aria-labelledby="heading-3" hidden>
+          <h1 id="heading-3" tabindex="-1">Choose an installation folder</h1>
+          <p class="intro">Install on this computer or keep a portable workspace on an external drive.</p>
+          <fieldset>
+            <legend class="sr-only">Installation type</legend>
+            <div class="choice-grid">
+              <label class="choice">
+                <input id="local" type="radio" name="location" checked>
+                <span class="choice-body"><strong>Local</strong><span>Install to a folder on this computer.</span></span>
+              </label>
+              <label class="choice">
+                <input id="portable" type="radio" name="location">
+                <span class="choice-body"><strong>Portable</strong><span>Keep apps, models, and data together on a drive.</span></span>
+              </label>
+            </div>
+          </fieldset>
+          <p class="notice" id="portable-note" hidden>Choose a folder on a connected external drive. Use the portable launchers on that drive; portable setup does not change your PATH.</p>
+          <div class="panel folder">
+            <div><h2>Parent folder</h2><p class="path" id="directory"></p></div>
+            <button type="button" id="browse">Choose folder…</button>
+          </div>
+          <fieldset class="panel imports" id="imports" hidden>
+            <legend class="sr-only">Copy existing TIM data</legend>
+            <h2>Copy data from a separate TIM installation</h2>
+            <p class="quiet">Optional. The existing app and its data stay where they are. Choose one source or start fresh.</p>
+            <div id="import-choices"></div>
+          </fieldset>
+          <div class="panel review" aria-labelledby="review-title">
+            <h2 id="review-title">Installation review</h2>
+            <div class="versions" id="versions" hidden>
+              <div><span>Installed version</span><strong id="installed-version"></strong></div>
+              <div><span>Installer version</span><strong id="available-version"></strong></div>
+            </div>
+            <dl id="review"></dl>
+            <p id="plan-status" class="quiet" role="status"></p>
+            <ul id="plan-errors" class="issues errors" role="alert" hidden></ul>
+            <ul id="plan-warnings" class="issues warnings" hidden></ul>
+            <button type="button" id="recheck" hidden>Check again</button>
+          </div>
+        </section>
+
+        <section id="step-4" aria-labelledby="heading-4" hidden>
+          <h1 id="heading-4" tabindex="-1">Installing TIM Studio</h1>
+          <p class="intro" id="install-intro">Keep this window open until setup finishes.</p>
+          <div class="panel progress-panel" id="progress-panel">
+            <div class="progress-heading">
+              <h2 id="progress-label">Starting installation…</h2>
+              <span class="progress-value" id="progress-value" aria-hidden="true"></span>
+            </div>
+            <progress id="progress" max="100" aria-labelledby="progress-label"></progress>
+            <p class="quiet" id="progress-detail"></p>
+            <p class="quiet" id="cancel-status" role="status" hidden></p>
+          </div>
+          <div class="panel done-panel" id="done-panel" hidden>
+            <h2 id="done-components"></h2>
+            <p class="path" id="done-folder"></p>
+            <p class="quiet" id="done-portable" hidden>Use the launchers in this folder when the external drive is connected.</p>
+            <div class="launch-actions">
+              <button class="primary" type="button" data-action="desktop">Open TIM Desktop</button>
+              <button type="button" data-action="cli">Open TIM CLI</button>
+              <button type="button" data-action="folder">Show installation folder</button>
+            </div>
+            <p class="quiet" id="open-status" role="status" hidden></p>
+          </div>
+          <p class="sr-only" id="progress-announcement" role="status"></p>
+        </section>
+        <div class="controls" aria-label="Setup controls">
+          <button type="button" id="back" hidden>Back</button>
+          <span class="spacer"></span>
+          <button type="button" id="skip" hidden>Skip models</button>
+          <button type="button" id="cancel" hidden>Cancel installation</button>
+          <button class="primary" type="button" id="next" disabled>Continue</button>
+        </div>
+      </main>
+    </div>
+  </div>
+</body>
+</html>

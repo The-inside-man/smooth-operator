@@ -15,6 +15,7 @@ export function useEditorInput(handler,options){
   if(value==='\x1b[200~'){mouse.current.reset();paste.current='';return;}
   if(value==='\x1b[201~'){if(paste.current!==null){handler(paste.current,{paste:true});paste.current=null;}return;}
   if(paste.current!==null){paste.current+=value;return;}
+  if(value==='\x1bOQ'||value==='\x1b[12~'){mouse.current.reset();handler('',{f2:true});return;}
   const report=mouse.current.read(value);
   if(report){if(report.wheel)handler('',{wheel:report.wheel});if(report.text)handler(report.text,{});return;}
   // A slow terminal read can coalesce ordinary typing with physical Backspace.

@@ -45,8 +45,9 @@ async function findBinary(directory, filename, depth = 4) {
   return null;
 }
 
-export async function ensureChatRuntime(dataDir, libraryRoot, { signal, onChange = () => {}, fetchImpl = fetch } = {}) {
-  const existing = await findRuntime(libraryRoot, 'chat', 'cpu', dataDir) || await findSystemChatRuntime('cpu');
+export async function ensureChatRuntime(dataDir, libraryRoot, { signal, onChange = () => {}, fetchImpl = fetch, managedOnly = false } = {}) {
+  const existing = await findRuntime(managedOnly ? null : libraryRoot, 'chat', 'cpu', dataDir)
+    || (!managedOnly && await findSystemChatRuntime('cpu'));
   if (existing) { onChange({ status: 'ready', progress: 100 }); return existing; }
   const asset = runtimeAssets[`${process.platform}-${process.arch}`];
   if (!asset) throw new Error(`Automatic chat engine setup is unavailable for ${process.platform}/${process.arch}. Install an engine pack in Settings.`);

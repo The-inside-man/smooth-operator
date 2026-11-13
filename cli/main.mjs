@@ -4,6 +4,7 @@ import {loadSelection,saveSelection,preferenceRoot} from './preferences.mjs';
 import {selection,boundary} from './activity.mjs';
 import React from 'react';
 import {render} from 'ink';
+import {readFileSync} from 'node:fs';
 import path from 'node:path';
 import {App,help} from './app.mjs';
 import {Client,demoState,clean} from './core.mjs';
@@ -13,7 +14,8 @@ import {providerGuide,providerOverview} from './provider-help.mjs';
 import {mouseEnable,mouseDisable} from './mouse.mjs';
 import {tokenSettingsFromOptions,saveTokenSettings} from './token-settings.mjs';
 const args=process.argv.slice(2);
-const usage=`TIM Studio terminal 0.1.0
+const {version}=JSON.parse(readFileSync(new URL('../package.json',import.meta.url),'utf8'));
+const usage=`TIM Studio terminal ${version}
 Usage: tim REQUEST... (configured model interprets the request)
        tim [--demo | --tools] [--url http://127.0.0.1:PORT]
            [--data-dir DIRECTORY] [--library DIRECTORY] [--no-color] [--no-animation] [--no-mouse]
@@ -51,13 +53,16 @@ Enter sends; Ctrl+S also sends; Ctrl+J or Alt+Enter inserts a newline; Esc cance
 Ctrl+P previous page; Ctrl+N next page; Ctrl+L latest output (Control on Mac, not Command).
 Up/Down recalls older/newer requests and commands; Down past newest restores your draft.
 Review recalled text, then Enter runs it again. Multiline drafts keep line navigation until a boundary.
+F2 or /select pauses repainting for native text selection; drag and copy, then F2 or Esc resumes.
+/copy copies the latest response; /copy code copies fenced source.
+/save PATH [--run] [--block N] reviews generated code before writing; /run [PATH] [ARGS...] reviews launch.
 Two-finger trackpad / mouse wheel scrolls content when terminal mouse reporting is allowed.
 --no-mouse keeps native terminal selection/scrollback; keyboard scrolling remains available.
 First run: choose an available model when prompted. /models reopens the chooser.
 /model N selects chat; /agent N configures the main agent.
 Package operations always require an exact command review before mutation.`;
 if(args[0]==='--help'||args[0]==='-h'){console.log(usage);process.exit(0);}
-if(args[0]==='--version'||args[0]==='-v'){console.log('TIM Studio 0.1.0');process.exit(0);}
+if(args[0]==='--version'||args[0]==='-v'){console.log('TIM Studio '+version);process.exit(0);}
 if(args[0]==='providers'){
  try{const {options,request}=parseArgs(args);if(options['max-tokens']!==undefined||options.context!==undefined)throw new Error('Use --max-tokens and --context when starting TIM, not with tim providers.');if(request.length>1)throw new Error('Use tim providers [openai|xai|anthropic].');console.log(request[0]?providerGuide(request[0],{shell:options.shell||(process.platform==='win32'?'powershell':process.platform==='darwin'?'zsh':'bash')}):providerOverview());}
  catch(error){console.error('TIM providers: '+clean(error.message));process.exitCode=1;}
@@ -104,7 +109,7 @@ try{
   }
   let initial=client?await client.request('state'):structuredClone(demoState);
   if(client&&Object.keys(tokenSettings).length)initial=await saveTokenSettings(client,tokenSettings,initial);
-  if(client&&!options.demo&&!options.tools){if(chosen.provider==='local'&&!chosen.modelId)chosen.modelId=initial.loadedModelId||initial.config?.mainAgentModelId||'';if(!setup)await saveSelection(preferenceRoot(options),chosen);}
+  if(client&&!options.demo&&!options.tools){if(chosen.provider==='local'&&!chosen.modelId)chosen.modelId=initial.loadedModelId||initial.config?.mainAgentModelId||initial.config?.defaultModels?.chat||'';if(!setup)await saveSelection(preferenceRoot(options),chosen);}
   if(client){const session=backend?.session||await client.request('sessions',{});initial.sessions=[session,...initial.sessions.filter(s=>s.id!==session.id)];}
   if(!interactive){console.log('TIM Studio / SAMPLE DATA');console.log('Interactive terminal required for composing.');}
   else{
@@ -118,7 +123,7 @@ try{
    if(read){const {CaptureScreen}=await import('./capture-screen.mjs');component=React.createElement(CaptureScreen,{client,file:request[0],request:request.slice(1).join(' '),options,onQuit:signal});}
    else if(listen){const {ListenScreen}=await import('./listen-screen.mjs');component=React.createElement(ListenScreen,{client,request:request.join(' '),options,onQuit:signal});}
    else if(install){const {InstallScreen}=await import('./install-screen.mjs');component=React.createElement(InstallScreen,{client,request:request.join(' '),manager:options.manager,onQuit:signal});}
-   else component=React.createElement(App,{client,demo:!!options.demo,initial,startTools:!!options.tools,startSetup:setup,onQuit:signal,initialRequest:natural?request.join(' '):'',animation:!options['no-animation'],onSelection:s=>saveSelection(preferenceRoot(options),s)});
+   else component=React.createElement(App,{client,demo:!!options.demo,initial,startTools:!!options.tools,startSetup:setup,onQuit:signal,initialRequest:natural?request.join(' '):'',animation:!options['no-animation'],mouseReporting:mouseEnabled,onSelection:s=>saveSelection(preferenceRoot(options),s)});
    ui=render(React.createElement(TerminalBoundary,null,component),{exitOnCtrlC:false,maxFps:20,patchConsole:true});await ui.waitUntilExit();
    process.off('SIGINT',signal);process.off('SIGTERM',signal);
   }

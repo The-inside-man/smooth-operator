@@ -33,7 +33,32 @@ async function fileResponse(req, res, filename, download = false) {
   const stream = createReadStream(filename, { start, end });
   stream.on('error', () => res.destroy()); res.on('close', () => stream.destroy()); stream.pipe(res);
 }
-export async function startServer({ port = 4317, dataDir = process.env.TIM_DATA_DIR || path.join(root, 'data'), staticDir = path.join(root, 'dist'), autoSetup = process.env.TIM_AUTO_SETUP !== '0', telemetry = true, libraryRoot, authToken, management } = {}) {
+export async function startServer(options = {}) {
+  const dataDir = path.resolve(options.dataDir || process.env.TIM_DATA_DIR || path.join(root, 'data'));
+  const { installationData, lockInstallationData, readInstallation } = await import('./install-profile.mjs');
+  const managed = path.basename(dataDir) === installationData && await readInstallation(path.dirname(dataDir));
+  const release = managed ? await lockInstallationData(dataDir) : null;
+  try {
+    if (managed) {
+      const unfinished = await fs.lstat(path.join(path.dirname(dataDir), '.tim-upgrade')).catch(error => {
+        if (error.code === 'ENOENT') return null;
+        throw error;
+      });
+      if (unfinished) throw new Error('Open the TIM Studio installer and retry the unfinished upgrade.');
+    }
+    const service = await startStudioServer({ ...options, dataDir, ...(managed ? { autoSetup: false } : {}) });
+    if (!release) return service;
+    const close = service.close;
+    let closing;
+    service.close = () => closing ||= close().finally(release);
+    return service;
+  } catch (error) {
+    await release?.();
+    throw error;
+  }
+}
+
+async function startStudioServer({ port = 4317, dataDir, staticDir = path.join(root, 'dist'), autoSetup = process.env.TIM_AUTO_SETUP !== '0', telemetry = true, libraryRoot, authToken, management }) {
   const studio = new Studio(dataDir); studio.on('error', error => console.error('Studio:', error.message)); await studio.init({ telemetry, libraryRoot });
   const clients = new Set();
   const server = http.createServer(async (req, res) => {

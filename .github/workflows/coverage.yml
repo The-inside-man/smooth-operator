@@ -1,0 +1,86 @@
+name: JavaScript coverage
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+concurrency:
+  group: coverage-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+jobs:
+  measure:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Run tests and collect coverage
+        run: |
+          mkdir -p "$RUNNER_TEMP/tim-coverage"
+          node --test --test-timeout=120000 --experimental-test-coverage \
+            --test-coverage-include='cli/**' \
+            --test-coverage-include='server/**' \
+            --test-coverage-include='desktop/**' \
+            --test-reporter=spec --test-reporter-destination=stdout \
+            --test-reporter=lcov --test-reporter-destination="$RUNNER_TEMP/tim-coverage/lcov.info" \
+            tests/*.test.mjs
+      - name: Summarize line coverage
+        run: |
+          awk -F: '
+            /^LF:/ { total += $2 }
+            /^LH:/ { covered += $2 }
+            END {
+              if (total == 0) exit 1
+              percent = 100 * covered / total
+              color = (percent >= 90 ? "brightgreen" : percent >= 75 ? "green" : percent >= 60 ? "yellow" : "orange")
+              printf "{\"schemaVersion\":1,\"label\":\"JS coverage\",\"message\":\"%.1f%%\",\"color\":\"%s\"}\n", percent, color
+            }
+          ' "$RUNNER_TEMP/tim-coverage/lcov.info" > "$RUNNER_TEMP/tim-coverage/coverage.json"
+          node -e 'console.log("JavaScript line coverage: " + require(process.argv[1]).message)' \
+            "$RUNNER_TEMP/tim-coverage/coverage.json" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: javascript-coverage
+          path: ${{ runner.temp }}/tim-coverage/
+          if-no-files-found: error
+
+  publish:
+    needs: measure
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: javascript-coverage
+          path: ${{ runner.temp }}/tim-coverage/
+      - name: Publish the coverage badge data
+        run: |
+          if git ls-remote --exit-code origin refs/heads/coverage-badge; then
+            git fetch origin refs/heads/coverage-badge
+            git switch --detach FETCH_HEAD
+          elif [ "$?" -eq 2 ]; then
+            git switch --orphan coverage-badge
+          else
+            exit 1
+          fi
+          cp "$RUNNER_TEMP/tim-coverage/coverage.json" coverage.json
+          git add coverage.json
+          if ! git diff --cached --quiet; then
+            git -c user.name='github-actions[bot]' \
+              -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+              commit -m "Update coverage from $GITHUB_SHA"
+            git push origin HEAD:refs/heads/coverage-badge
+          fi

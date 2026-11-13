@@ -176,11 +176,11 @@ const fullCatalog=catalogModels.filter(entry=>entry.kind==='chat'),starter=fullC
 const freshMemory=()=>({totalBytes:32*2**30,availableBytes:24*2**30,reserveBytes:4*2**30,modelBudgetBytes:20*2**30,sampledAt:Date.now(),stale:false,status:'ok',availableSource:'os'});
 const installedStarter=()=>({id:'catalog:'+starter.id,catalogId:starter.id,name:starter.name,kind:'chat',available:true});
 
-test('/models mixes the installed current starter with the other fourteen downloadable catalog models',async()=>{
+test('/models mixes the installed current starter with the remaining downloadable catalog models',async()=>{
  const app=await mount({modelList:[installedStarter()],mainAgentModelId:'catalog:'+starter.id,selection:{provider:'local',modelId:'catalog:'+starter.id},catalog:fullCatalog,memory:freshMemory()});
  try{
   await app.key('/models');const list=await app.key('\r',/TIM \/ MODELS/);
-  assert.match(list,/TIM \/ MODELS/);assert.match(list,/15 chat models \/ 1 available \/ 14 downloadable/);
+  assert.match(list,/TIM \/ MODELS/);assert.ok(list.includes(`${fullCatalog.length} chat models / 1 available / ${fullCatalog.length-1} downloadable`));
   assert.match(list,/Qwen3 0\.6B.*\[CURRENT\].*installed/);assert.match(list,/Qwen3 4B.*download/);
   assert.match(list,/Qwen2\.5 Coder 7B.*download/);assert.match(list,/SUGGESTED/);
   await app.key('\x12');assert.equal(app.calls.filter(call=>call.route==='rescan').length,1);
@@ -191,17 +191,31 @@ test('/models mixes the installed current starter with the other fourteen downlo
  }finally{await app.close();}
 });
 
+test('Gemma 4 models appear as downloads and opening a Gemma review does not start setup',async()=>{
+ const app=await mount({modelList:[],catalog:fullCatalog,memory:freshMemory()});
+ try{
+  for(const name of ['E2B','E4B','12B','26B A4B','31B'])assert.match(app.output,new RegExp(`Gemma 4 ${name}[^\\n]*download`));
+  const gemmaNumber=fullCatalog.findIndex(entry=>entry.id==='gemma-4-e4b')+1;
+  assert.ok(gemmaNumber>0,'Gemma E4B is a chat catalog entry');
+  await app.key(String(gemmaNumber));
+  const review=await app.key('\r',/REVIEW \/ Gemma 4 E4B/);
+  assert.match(review,/Enter start setup/);
+  assert.equal(app.calls.filter(call=>call.route==='setup').length,0);
+ }finally{await app.close();}
+});
+
 for(const command of ['model','agent'])test(`/${command} uses the displayed combined numbering even when imported models precede catalog rows`,async()=>{
  const imported={id:'my-imported-model',name:'My imported model',kind:'chat',available:true},starterModel=installedStarter();
  const selectedModel={id:'catalog:'+larger.id,catalogId:larger.id,name:larger.name,kind:'chat',available:true};
+ const largerNumber=fullCatalog.filter(entry=>entry.id!==starter.id).findIndex(entry=>entry.id===larger.id)+3;
  const selectedMode=command==='agent'?'agent':'chat',mainAgentModelId=selectedMode==='agent'?selectedModel.id:starterModel.id;
  const setupResult={models:[imported,starterModel,selectedModel],config:{mainAgentModelId},catalog:fullCatalog,engines:{chat:{available:true}},runtimeSetup:{status:'ready'},orchestrator:{status:'running',loaded:true,modelId:mainAgentModelId},loadedModelId:selectedModel.id,loadedModels:[{modelId:selectedModel.id,role:selectedMode}],localSetup:{catalogId:larger.id,status:'ready',mode:selectedMode}};
  const app=await mount({modelList:[imported,starterModel],mainAgentModelId:starterModel.id,selection:{provider:'local',modelId:starterModel.id},catalog:fullCatalog,memory:freshMemory(),setupResult});
  try{
   await app.key('/models');const list=await app.key('\r',/TIM \/ MODELS/);
-  assert.match(list,/16 chat models \/ 2 available \/ 14 downloadable/);
-  assert.match(list,/1\. My imported model.*installed/);assert.match(list,/4\. Qwen3 4B.*download/);
-  await app.key('\x1b');await app.key('/'+command+' 4');const review=await app.key('\r',/REVIEW \/ Qwen3 4B/);
+  assert.ok(list.includes(`${fullCatalog.length+1} chat models / 2 available / ${fullCatalog.length-1} downloadable`));
+  assert.match(list,/1\. My imported model.*installed/);assert.match(list,new RegExp(`${largerNumber}\\. Qwen3 4B.*download`));
+  await app.key('\x1b');await app.key(`/${command} ${largerNumber}`);const review=await app.key('\r',/REVIEW \/ Qwen3 4B/);
   assert.match(review,/REVIEW \/ Qwen3 4B/);assert.match(review,/Enter start setup/);
   assert.equal(app.calls.filter(call=>call.route==='setup').length,0,'slash selection must open review before downloading');
   await app.key('\r');await app.wait(()=>app.selections.length===1,'selected downloadable model ready');

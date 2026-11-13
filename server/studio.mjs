@@ -21,6 +21,7 @@ import { ensureChatRuntime, findSystemChatRuntime } from './runtime-setup.mjs';
 import { PipelineManager, validatePipeline } from './pipelines.mjs';
 import { createPipelineExecutor, validatePipelineModel } from './pipeline-executor.mjs';
 import { MemoryMonitor, estimateModelBytes } from './memory.mjs';
+import {scriptInstructions} from './script-format.mjs';
 const exec = promisify(execFile);
 const defaultModelKinds = { chat: 'chat', code: 'chat', image: 'image', upscale: 'upscale', video: 'video', transcribe: 'transcribe' };
 const defaultModes = ['agent', ...Object.keys(defaultModelKinds)];
@@ -34,12 +35,13 @@ const waitForLoad = (promise, signal) => new Promise((resolve, reject) => {
 });
 export function jobSettings(body, kind, model) {
   const s = body.settings || {};
+  if(body.scriptLanguage!==undefined){scriptInstructions(body.scriptLanguage);if(!['chat','agent'].includes(kind))throw new Error('Script output is available in Chat, Code or Agent mode.');}
   const video = kind === 'video';
   const width = numeric(s.width, model?.profile?.width || 512, 64, 2048), height = numeric(s.height, model?.profile?.height || (video ? 288 : 512), 64, 2048);
   if (width % 32 || height % 32) throw new Error('Dimensions must be multiples of 32.');
   const frames = numeric(s.frames, 33, 5, 121);
   if ((frames - 1) % 4) throw new Error('Video frames must be 4n + 1.');
-  return { prompt: String(body.prompt || '').trim(), negativePrompt: String(s.negativePrompt || ''), width, height, frames, steps: s.steps === undefined ? undefined : numeric(s.steps, 20, 1, 100), cfg: s.cfg === undefined ? undefined : numeric(s.cfg, 7, 0, 30, false), seed: numeric(s.seed, -1, -1, 2147483647) };
+  return { prompt: String(body.prompt || '').trim(), negativePrompt: String(s.negativePrompt || ''), width, height, frames, steps: s.steps === undefined ? undefined : numeric(s.steps, 20, 1, 100), cfg: s.cfg === undefined ? undefined : numeric(s.cfg, 7, 0, 30, false), seed: numeric(s.seed, -1, -1, 2147483647),...(body.scriptLanguage===undefined?{}:{scriptLanguage:body.scriptLanguage}) };
 }
 export class Studio extends EventEmitter {
   constructor(dataDir) {
@@ -597,8 +599,8 @@ export class Studio extends EventEmitter {
         }
         update('Waiting for model output');
         if (job.kind === 'agent') await runAgent(this, job, message, history, controller.signal);
-        else if (job.provider && job.provider !== 'local') await (this.generateCloud || generateCloud)({provider:job.provider,modelId:job.modelId,messages:[{role:'system',content:'You are TIM Studio. Give clear practical answers. Do not claim to execute tools.'},...history],maxTokens:this.config.maxTokens, intentKind:job.intentKind,signal:controller.signal,onActivity:phase=>update(phase),onText:token=>{message.content+=token;this.changed();}});
-        else await chatEngine.generate([{ role: 'system', content: this.config.systemPrompt }, ...history], { ...this.config, enableThinking: false }, controller.signal, token => { message.content += token; job.lastActivityAt=Date.now(); job.phase='Generating response'; this.changed(); }, usage => {
+        else if (job.provider && job.provider !== 'local') await (this.generateCloud || generateCloud)({provider:job.provider,modelId:job.modelId,messages:[{role:'system',content:'You are TIM Studio. Give clear practical answers. Do not claim to execute tools.'+scriptInstructions(job.settings.scriptLanguage)},...history],maxTokens:this.config.maxTokens, intentKind:job.intentKind,signal:controller.signal,onActivity:phase=>update(phase),onText:token=>{message.content+=token;this.changed();}});
+        else await chatEngine.generate([{ role: 'system', content: this.config.systemPrompt+scriptInstructions(job.settings.scriptLanguage) }, ...history], { ...this.config, enableThinking: false }, controller.signal, token => { message.content += token; job.lastActivityAt=Date.now(); job.phase='Generating response'; this.changed(); }, usage => {
           if (usage.removedMessages > 0) { job.contextUsage = usage; message.contextUsage = usage; this.changed(); }
         });
         if (!message.content.trim()) throw new Error('The model returned no answer. Try again or choose a different model.');
