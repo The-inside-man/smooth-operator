@@ -102,6 +102,7 @@ export function LocalSetupScreen({size,client,onReady,onBack,onQuit,staticPrevie
   add(selected?'REVIEW / '+line(selected.name||selected.id):'Selected model is no longer available',selected?colors.green:colors.amber);
   add(`${selected?.installed?'Model files: already installed':'Model download: '+setupBytes(selected?.downloadBytes)} / estimated RAM: ${gib(selected?.estimatedMemoryBytes)}`);
   add(status.runtimeAvailable?'Chat engine: already installed.':'Chat engine: install if needed (about 12–25 MB).');
+  if(selected?.requirements?.[0])add(selected.requirements[0],colors.muted);
   add('Internet is needed for downloads. Chat runs locally afterward.',colors.muted);
   add(error?'Press Enter to retry; verified completed files are reused.':mode==='agent'?'Confirm to select this as the main agent and load it locally.':`Confirm to switch to ${mode==='code'?'Code':'Chat'} mode and load this model locally.`,colors.muted);
  }else{

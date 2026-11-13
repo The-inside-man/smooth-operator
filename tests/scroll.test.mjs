@@ -1,4 +1,5 @@
 import './terminal-env.mjs';
+import {terminalAct} from './terminal-act.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import React from 'react';
@@ -36,12 +37,17 @@ async function mount({width=80,count=140,running=true,sendError='FIXTURE_SEND_ST
   async watch(callback){watchState=callback;return new Promise(()=>{});},
   async request(route,body){calls.push({route,body});if(route==='jobs')throw new Error(sendError);return structuredClone(snapshot);},
  };
- const ui=render(React.createElement(App,{client,initial:structuredClone(snapshot),animation:false,onQuit:()=>{}}),{stdin,stdout,stderr:stdout,exitOnCtrlC:false,patchConsole:false});
- const exited=ui.waitUntilExit();await delay(90);
+ let ui;await terminalAct(()=>{ui=render(React.createElement(App,{client,initial:structuredClone(snapshot),animation:false,onQuit:()=>{}}),{stdin,stdout,stderr:stdout,exitOnCtrlC:false,patchConsole:false});});
+ const exited=ui.waitUntilExit();
+ const close=async()=>{try{await terminalAct(()=>ui.unmount());await exited;}finally{ui.cleanup();client.controller.abort();stdin.destroy();stdout.destroy();}};
+ try{
+  for(let attempt=0;attempt<200&&(!output.includes('COMMAND')||typeof watchState!=='function');attempt++)await delay(25);
+  assert.ok(output.includes('COMMAND')&&typeof watchState==='function','initial scroll fixture render and watcher\n'+clean(output).slice(-4000));
+ }catch(error){await close();throw error;}
  return {calls,get output(){return clean(output);},
-  async key(value){const offset=output.length;stdin.write(value);await delay(65);return clean(output.slice(offset));},
-  async push(count,{running=true}={}){const offset=output.length;snapshot={...snapshot,sessions:[{...snapshot.sessions[0],messages:[{role:'assistant',content:content(count),status:running?'running':'completed'}]}],jobs:running?snapshot.jobs:[]};watchState(structuredClone(snapshot));await delay(90);return clean(output.slice(offset));},
-  async close(){ui.unmount();await exited;ui.cleanup();client.controller.abort();stdin.destroy();stdout.destroy();},
+  async key(value){const offset=output.length;await terminalAct(()=>stdin.write(value));await delay(65);return clean(output.slice(offset));},
+  async push(count,{running=true}={}){const offset=output.length;snapshot={...snapshot,sessions:[{...snapshot.sessions[0],messages:[{role:'assistant',content:content(count),status:running?'running':'completed'}]}],jobs:running?snapshot.jobs:[]};await terminalAct(()=>watchState(structuredClone(snapshot)));await delay(90);return clean(output.slice(offset));},
+  close,
  };
 }
 const range=frame=>{const match=[...frame.matchAll(/Review lines (\d+)-(\d+) of (\d+)/g)].at(-1);assert.ok(match,frame);return match.slice(1).map(Number);};

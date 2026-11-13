@@ -4,13 +4,13 @@ import {getModelChoices,getModelRecommendations} from '../cli/model-recommendati
 import {catalogModels} from '../server/catalog.mjs';
 
 const GiB=2**30;
+const chatCount=catalogModels.filter(entry=>entry.kind==='chat').length;
 const machine=(budget=24,total=32)=>({catalog:catalogModels,memory:{totalBytes:total*GiB,availableBytes:(budget+Math.max(1,total*.1))*GiB,reserveBytes:Math.max(1,total*.1)*GiB,modelBudgetBytes:budget*GiB,status:'ok',availableSource:'os',stale:false},hardware:{cpuName:'Fixture CPU',logicalCores:8,platform:'darwin',arch:'arm64'}});
 
 test('every supported chat model stays visible in catalog order with memory and installation details',()=>{
  const snapshot={...machine(),models:[{id:'installed-four',catalogId:'qwen3-4b',available:false,issue:'Chat engine missing'}]};
  const result=getModelRecommendations(snapshot),chats=catalogModels.filter(entry=>entry.kind==='chat');
  assert.deepEqual(result.options.map(option=>option.id),chats.map(entry=>entry.id));
- assert.equal(result.options.length,15);
  assert.ok(result.options.every(option=>option.estimatedMemoryBytes===Math.round(option.memoryGB*GiB)));
  const installed=result.options.find(option=>option.id==='qwen3-4b');
  assert.equal(installed.installed,true);assert.equal(installed.available,false);assert.equal(installed.modelId,'installed-four');assert.equal(installed.issue,'Chat engine missing');
@@ -39,7 +39,7 @@ test('low-memory machines receive only comfortable suggestions while oversized c
  const large=result.options.find(option=>option.id==='qwen3-14b');
  assert.equal(large.fit,'too-large');assert.equal(large.suggested,false);
  assert.equal(result.options.find(option=>option.id==='qwen2.5-3b').fit,'tight');
- assert.equal(result.options.length,15,'memory fit warns without hiding supported models');
+ assert.equal(result.options.length,chatCount,'memory fit warns without hiding supported models');
 });
 
 test('unknown or stale memory produces no automatic suggestions',()=>{
@@ -47,7 +47,7 @@ test('unknown or stale memory produces no automatic suggestions',()=>{
   const result=getModelRecommendations({catalog:catalogModels,memory});
   assert.equal(result.suggestedIds.length,0);
   assert.equal(result.memory.reliable,false);assert.match(result.memory.notice,/unavailable|stale/);
-  assert.equal(result.options.length,15);
+  assert.equal(result.options.length,chatCount);
  }
 });
 
@@ -92,7 +92,7 @@ test('legacy memory fields are normalized without mutating catalog or snapshot i
 test('combined model choices put installed catalog IDs first and include every remaining download',()=>{
  const model={id:'actual-installed-four',catalogId:'qwen3-4b',name:'My installed 4B',kind:'chat',available:true,issue:'',validation:'Ran successfully'};
  const snapshot={...machine(),models:[model]},before=structuredClone(snapshot),result=getModelChoices(snapshot);
- assert.equal(result.choices.length,15);
+ assert.equal(result.choices.length,chatCount);
  const installed=result.choices[0],catalog=result.options.find(entry=>entry.id==='qwen3-4b');
  assert.equal(installed.id,model.id);assert.equal(installed.modelId,model.id);assert.equal(installed.name,model.name);assert.equal(installed.catalogId,'qwen3-4b');
  assert.equal(installed.kind,'chat');assert.equal(installed.installed,true);assert.equal(installed.available,true);assert.equal(installed.validation,'Ran successfully');
@@ -112,7 +112,7 @@ test('combined choices preserve external imports and registry order without inve
   {id:'speech',name:'Speech model',kind:'transcribe',available:true},
  ]};
  const result=getModelChoices(snapshot);
- assert.equal(result.choices.length,18);assert.deepEqual(result.choices.slice(0,4).map(choice=>choice.id),['external-sized','installed-eight','external-estimated','external-unknown']);
+ assert.equal(result.choices.length,chatCount+3);assert.deepEqual(result.choices.slice(0,4).map(choice=>choice.id),['external-sized','installed-eight','external-estimated','external-unknown']);
  for(const id of ['external-sized','external-estimated','external-unknown']){const choice=result.choices.find(choice=>choice.id===id);assert.equal(choice.installed,true);assert.equal(choice.fit,'unknown');assert.equal(choice.suggested,false);assert.equal(choice.suggestionKind,undefined);}
  assert.equal(result.choices[0].estimatedMemoryBytes,Math.round(2*GiB*1.2+.5*GiB));assert.equal(result.choices[2].estimatedMemoryBytes,6*GiB);assert.equal(result.choices[3].estimatedMemoryBytes,null);
  assert.equal(result.choices[0].available,true);assert.equal(result.choices[1].available,false);assert.equal(result.choices[1].issue,'Chat engine missing');assert.equal(result.choices[3].issue,'Disconnected drive');
@@ -142,7 +142,7 @@ test('combined model choices deduplicate catalog and registry identities and exc
   {id:'image',name:'Not chat',kind:'image',available:true},
  ]};
  const result=getModelChoices(snapshot);
- assert.equal(result.choices.length,16);assert.deepEqual(result.choices.slice(0,2).map(choice=>choice.name),['First copy','External first']);
+ assert.equal(result.choices.length,chatCount+1);assert.deepEqual(result.choices.slice(0,2).map(choice=>choice.name),['First copy','External first']);
  assert.equal(result.choices.filter(choice=>choice.catalogId==='qwen3-4b').length,1);assert.equal(result.choices.filter(choice=>choice.id==='external').length,1);
  assert.equal(result.choices.find(choice=>choice.catalogId==='qwen3-8b').available,false,'a skipped duplicate registry ID cannot create another installed choice');
  assert.equal(new Set(result.choices.map(choice=>choice.id)).size,result.choices.length);

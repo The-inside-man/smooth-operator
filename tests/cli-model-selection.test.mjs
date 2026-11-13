@@ -51,10 +51,10 @@ async function mount({modelList=models,mainAgentModelId='',initialRequest='',sel
   for(let attempt=0;attempt<120;attempt++){if(predicate())return;await delay(25);}
   assert.fail(label+'\n'+clean(output).slice(-5500));
  };
- try{await wait(()=>readyCheck?readyCheck():output.length>0,'initial render');await delay(80);}
+ try{await wait(()=>readyCheck?readyCheck():clean(output).includes('TIM / MODELS')||output.includes('COMMAND'),'initial render');await delay(80);}
  catch(error){await close();throw error;}
  return {calls,selections,state,client,get output(){return clean(output);},get quits(){return quits;},
-  async key(value){const offset=output.length;await terminalAct(()=>stdin.write(value));await delay(90);return clean(output.slice(offset));},
+  async key(value,expected){const offset=output.length;await terminalAct(()=>stdin.write(value));if(expected)await wait(()=>expected.test(clean(output.slice(offset))),'frame after '+JSON.stringify(value)+' must match '+expected);else await delay(90);return clean(output.slice(offset));},
   wait,
   close,
  };
@@ -65,7 +65,7 @@ test('missing local model opens choices; arrows persist agent choice and Enter o
  try{
   assert.match(app.output,/TIM \/ MODELS/);assert.match(app.output,/Alpha available/);assert.match(app.output,/Beta available/);
   assert.equal(app.calls.filter(c=>c.route==='jobs').length,0);
-  await app.key('\x1b[B');const afterChoice=await app.key('\r');
+  await app.key('\x1b[B');const afterChoice=await app.key('\r',/COMMAND/);
   assert.deepEqual(app.calls.filter(c=>c.route==='settings').map(c=>c.body),[{mainAgentModelId:'beta'}]);
   assert.match(afterChoice,/COMMAND/);assert.equal(app.calls.filter(c=>c.route==='jobs').length,0,'choosing a model must not send a request');
   await app.key('hello after choosing');await app.key('\r');
@@ -77,11 +77,11 @@ test('missing local model opens choices; arrows persist agent choice and Enter o
 test('Escape and repeated missing-model submission preserve multiline Unicode draft until a separate send',async()=>{
  const app=await mount();
  try{
-  assert.match(await app.key('\x1b'),/COMMAND/);
+  assert.match(await app.key('\x1b',/COMMAND/),/COMMAND/);
   await app.key('\x1b[200~');await app.key('Hey 界\nsecond line');await app.key('\x1b[201~');
-  assert.match(await app.key('\r'),/TIM \/ MODELS/);assert.equal(app.calls.filter(c=>c.route==='jobs').length,0);
-  assert.match(await app.key('\x1b'),/second line/);await app.key('!');
-  assert.match(await app.key('\r'),/TIM \/ MODELS/);await app.key('\r');
+  assert.match(await app.key('\r',/TIM \/ MODELS/),/TIM \/ MODELS/);assert.equal(app.calls.filter(c=>c.route==='jobs').length,0);
+  assert.match(await app.key('\x1b',/second line/),/second line/);await app.key('!');
+  assert.match(await app.key('\r',/TIM \/ MODELS/),/TIM \/ MODELS/);await app.key('\r');
   assert.equal(app.calls.filter(c=>c.route==='jobs').length,0,'selection leaves the preserved draft for review');
   await app.key('\r');const jobs=app.calls.filter(c=>c.route==='jobs');
   assert.equal(jobs.length,1);assert.equal(jobs[0].body.prompt,'Hey 界\nsecond line!');
@@ -94,8 +94,8 @@ test('empty and unavailable local model lists give library guidance without cons
   try{
    assert.match(app.output,/TIM \/ MODELS/);assert.match(app.output,/--library/);
    await app.key('\r');assert.equal(app.calls.length,0,'no selection or inference request is possible');
-   await app.key('\x1b');await app.key('retain this request');assert.match(await app.key('\r'),/TIM \/ MODELS/);
-   assert.match(await app.key('\x1b'),/retain this request/);assert.equal(app.calls.length,0);
+   await app.key('\x1b');await app.key('retain this request');assert.match(await app.key('\r',/TIM \/ MODELS/),/TIM \/ MODELS/);
+   assert.match(await app.key('\x1b',/retain this request/),/retain this request/);assert.equal(app.calls.length,0);
    await app.key('\x11');assert.equal(app.quits,1);
   }finally{await app.close();}
  }
@@ -105,7 +105,7 @@ test('one-shot natural request waits for a model choice and a separate Enter bef
  const request='check port 999',app=await mount({initialRequest:request});
  try{
   assert.match(app.output,/TIM \/ MODELS/);assert.equal(app.calls.length,0,'initial request must not plan before model selection');
-  assert.match(await app.key('\r'),/check port 999/);assert.equal(app.calls.filter(c=>c.route==='jobs').length,0);
+  assert.match(await app.key('\r',/check port 999/),/check port 999/);assert.equal(app.calls.filter(c=>c.route==='jobs').length,0);
   await app.key('\r');await app.wait(()=>app.calls.some(c=>c.route==='jobs'),'natural planning request');
   const jobs=app.calls.filter(c=>c.route==='jobs');assert.equal(jobs.length,1);assert.equal(jobs[0].body.intentKind,'general');assert.equal(jobs[0].body.modelId,'alpha');assert.ok(jobs[0].body.prompt.includes(JSON.stringify(request)));
   assert.match(app.output,/FIXTURE_JOB_REJECTED/);
@@ -115,9 +115,9 @@ test('one-shot natural request waits for a model choice and a separate Enter bef
 test('failed selection remains in the model picker and retries without submitting',async()=>{
  const app=await mount({failFirstSave:true});
  try{
-  const failed=await app.key('\r');assert.match(failed,/TIM \/ MODELS/);assert.match(failed,/FIXTURE_SELECTION_SAVE_FAILED/);
+  const failed=await app.key('\r',/FIXTURE_SELECTION_SAVE_FAILED/);assert.match(failed,/TIM \/ MODELS/);assert.match(failed,/FIXTURE_SELECTION_SAVE_FAILED/);
   assert.equal(app.calls.filter(c=>c.route==='settings').length,1);assert.equal(app.calls.filter(c=>c.route==='jobs').length,0);
-  assert.match(await app.key('\r'),/COMMAND/);assert.equal(app.calls.filter(c=>c.route==='settings').length,2);assert.equal(app.calls.filter(c=>c.route==='jobs').length,0);
+  assert.match(await app.key('\r',/COMMAND/),/COMMAND/);assert.equal(app.calls.filter(c=>c.route==='settings').length,2);assert.equal(app.calls.filter(c=>c.route==='jobs').length,0);
  }finally{await app.close();}
 });
 
@@ -125,7 +125,7 @@ test('configured local model remains usable and /models explicitly opens the cho
  const app=await mount({mainAgentModelId:'alpha'});
  try{
   assert.doesNotMatch(app.output,/TIM \/ MODELS/);assert.match(app.output,/COMMAND/);
-  await app.key('/models');assert.match(await app.key('\r'),/TIM \/ MODELS/);
+  await app.key('/models');assert.match(await app.key('\r',/TIM \/ MODELS/),/TIM \/ MODELS/);
   await app.key('\x1b[B');await app.key('\r');
   assert.deepEqual(app.calls.filter(c=>c.route==='settings').map(c=>c.body),[{mainAgentModelId:'beta'}]);assert.equal(app.calls.filter(c=>c.route==='jobs').length,0);
  }finally{await app.close();}
@@ -144,9 +144,9 @@ test('unavailable explicit Chat selection opens choices and persists only the Ch
 test('invalid typed model number cannot select until arrow navigation resets the choice',async()=>{
  const app=await mount();
  try{
-  assert.match(await app.key('999'),/No model numbered 999/);await app.key('\r');
+  assert.match(await app.key('999',/No model numbered 999/),/No model numbered 999/);await app.key('\r');
   assert.equal(app.calls.filter(c=>c.route==='settings').length,0);assert.equal(app.calls.filter(c=>c.route==='jobs').length,0);
-  await app.key('\x1b[B');assert.match(await app.key('\r'),/COMMAND/);
+  await app.key('\x1b[B');assert.match(await app.key('\r',/COMMAND/),/COMMAND/);
   assert.deepEqual(app.calls.filter(c=>c.route==='settings').map(c=>c.body),[{mainAgentModelId:'beta'}]);
  }finally{await app.close();}
 });
@@ -176,32 +176,46 @@ const fullCatalog=catalogModels.filter(entry=>entry.kind==='chat'),starter=fullC
 const freshMemory=()=>({totalBytes:32*2**30,availableBytes:24*2**30,reserveBytes:4*2**30,modelBudgetBytes:20*2**30,sampledAt:Date.now(),stale:false,status:'ok',availableSource:'os'});
 const installedStarter=()=>({id:'catalog:'+starter.id,catalogId:starter.id,name:starter.name,kind:'chat',available:true});
 
-test('/models mixes the installed current starter with the other fourteen downloadable catalog models',async()=>{
+test('/models mixes the installed current starter with the remaining downloadable catalog models',async()=>{
  const app=await mount({modelList:[installedStarter()],mainAgentModelId:'catalog:'+starter.id,selection:{provider:'local',modelId:'catalog:'+starter.id},catalog:fullCatalog,memory:freshMemory()});
  try{
-  await app.key('/models');const list=await app.key('\r');
-  assert.match(list,/TIM \/ MODELS/);assert.match(list,/15 chat models \/ 1 available \/ 14 downloadable/);
+  await app.key('/models');const list=await app.key('\r',/TIM \/ MODELS/);
+  assert.match(list,/TIM \/ MODELS/);assert.ok(list.includes(`${fullCatalog.length} chat models / 1 available / ${fullCatalog.length-1} downloadable`));
   assert.match(list,/Qwen3 0\.6B.*\[CURRENT\].*installed/);assert.match(list,/Qwen3 4B.*download/);
   assert.match(list,/Qwen2\.5 Coder 7B.*download/);assert.match(list,/SUGGESTED/);
   await app.key('\x12');assert.equal(app.calls.filter(call=>call.route==='rescan').length,1);
   assert.equal(app.calls.filter(call=>call.route==='setup/options').length,1,'refresh samples the catalog and system memory together');
-  const selected=await app.key('\r');assert.match(selected,/COMMAND/);assert.doesNotMatch(selected,/TIM \/ LOCAL SETUP/);
+  const selected=await app.key('\r',/COMMAND/);assert.match(selected,/COMMAND/);assert.doesNotMatch(selected,/TIM \/ LOCAL SETUP/);
   assert.equal(app.calls.filter(call=>call.route==='setup').length,0,'selecting an installed model must not download anything');
   assert.deepEqual(app.selections,[{provider:'local',modelId:'catalog:'+starter.id}]);
+ }finally{await app.close();}
+});
+
+test('Gemma 4 models appear as downloads and opening a Gemma review does not start setup',async()=>{
+ const app=await mount({modelList:[],catalog:fullCatalog,memory:freshMemory()});
+ try{
+  for(const name of ['E2B','E4B','12B','26B A4B','31B'])assert.match(app.output,new RegExp(`Gemma 4 ${name}[^\\n]*download`));
+  const gemmaNumber=fullCatalog.findIndex(entry=>entry.id==='gemma-4-e4b')+1;
+  assert.ok(gemmaNumber>0,'Gemma E4B is a chat catalog entry');
+  await app.key(String(gemmaNumber));
+  const review=await app.key('\r',/REVIEW \/ Gemma 4 E4B/);
+  assert.match(review,/Enter start setup/);
+  assert.equal(app.calls.filter(call=>call.route==='setup').length,0);
  }finally{await app.close();}
 });
 
 for(const command of ['model','agent'])test(`/${command} uses the displayed combined numbering even when imported models precede catalog rows`,async()=>{
  const imported={id:'my-imported-model',name:'My imported model',kind:'chat',available:true},starterModel=installedStarter();
  const selectedModel={id:'catalog:'+larger.id,catalogId:larger.id,name:larger.name,kind:'chat',available:true};
+ const largerNumber=fullCatalog.filter(entry=>entry.id!==starter.id).findIndex(entry=>entry.id===larger.id)+3;
  const selectedMode=command==='agent'?'agent':'chat',mainAgentModelId=selectedMode==='agent'?selectedModel.id:starterModel.id;
  const setupResult={models:[imported,starterModel,selectedModel],config:{mainAgentModelId},catalog:fullCatalog,engines:{chat:{available:true}},runtimeSetup:{status:'ready'},orchestrator:{status:'running',loaded:true,modelId:mainAgentModelId},loadedModelId:selectedModel.id,loadedModels:[{modelId:selectedModel.id,role:selectedMode}],localSetup:{catalogId:larger.id,status:'ready',mode:selectedMode}};
  const app=await mount({modelList:[imported,starterModel],mainAgentModelId:starterModel.id,selection:{provider:'local',modelId:starterModel.id},catalog:fullCatalog,memory:freshMemory(),setupResult});
  try{
-  await app.key('/models');const list=await app.key('\r');
-  assert.match(list,/16 chat models \/ 2 available \/ 14 downloadable/);
-  assert.match(list,/1\. My imported model.*installed/);assert.match(list,/4\. Qwen3 4B.*download/);
-  await app.key('\x1b');await app.key('/'+command+' 4');const review=await app.key('\r');
+  await app.key('/models');const list=await app.key('\r',/TIM \/ MODELS/);
+  assert.ok(list.includes(`${fullCatalog.length+1} chat models / 2 available / ${fullCatalog.length-1} downloadable`));
+  assert.match(list,/1\. My imported model.*installed/);assert.match(list,new RegExp(`${largerNumber}\\. Qwen3 4B.*download`));
+  await app.key('\x1b');await app.key(`/${command} ${largerNumber}`);const review=await app.key('\r',/REVIEW \/ Qwen3 4B/);
   assert.match(review,/REVIEW \/ Qwen3 4B/);assert.match(review,/Enter start setup/);
   assert.equal(app.calls.filter(call=>call.route==='setup').length,0,'slash selection must open review before downloading');
   await app.key('\r');await app.wait(()=>app.selections.length===1,'selected downloadable model ready');

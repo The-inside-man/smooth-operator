@@ -5,7 +5,9 @@ const { pathToFileURL } = require('node:url');
 const fs = require('node:fs');
 let service, window, quitting = false;
 const portableRoot = process.env.TIM_HOME || (app.isPackaged ? (process.platform === 'darwin' ? path.resolve(path.dirname(app.getPath('exe')), '../../..') : path.dirname(process.env.APPIMAGE || app.getPath('exe'))) : path.resolve(__dirname, '..'));
-const dataDir = process.env.TIM_DATA_DIR || path.join(portableRoot, 'TIM-Studio-Data');
+const installedRoot = app.isPackaged && !process.env.TIM_HOME && path.basename(portableRoot) === 'desktop' && fs.existsSync(path.join(portableRoot, '..', 'tim-installation.json'))
+  ? path.dirname(portableRoot) : portableRoot;
+const dataDir = process.env.TIM_DATA_DIR || path.join(installedRoot, 'TIM-Studio-Data');
 app.setPath('userData', path.join(dataDir, 'desktop'));
 if (!app.requestSingleInstanceLock()) app.quit();
 else {

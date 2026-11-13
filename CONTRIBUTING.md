@@ -66,6 +66,14 @@ Real-model `smoke:*` scripts are optional and have different side effects. Read 
 
 CI runs automated tests, packaging, and native desktop startup on Windows x64, macOS Apple Silicon, macOS Intel, and Linux x64. Report what you tested locally and what remains untested; do not claim broader platform compatibility from a fixture or a single-machine run.
 
+The [coverage workflow](https://github.com/The-inside-man/smooth-operator/actions/workflows/coverage.yml) measures line coverage for JavaScript loaded by the Node tests in `cli/`, `server/`, and `desktop/` on Linux. Each successful run includes an LCOV artifact. The README badge uses the most recent successful coverage published from `main`. It appears after the first successful publication. Desktop UI and native model engines are outside this metric.
+
+## Assemble a GitHub release
+
+Use a successful [desktop workflow run on `main`](https://github.com/The-inside-man/smooth-operator/actions/workflows/desktop.yml?query=branch%3Amain) for the release commit. Attach the four platform-specific `TIM-Studio-Installer` packages to a draft release. The workflow also produces four desktop-only packages and `TIM-Studio-CLI-Installer.zip` for standalone CLI installation with a system Node.js. Match the tag to `package.json` with a `v` prefix and mark alpha versions as prereleases.
+
+To build the wizard locally for the current platform, use the official Node.js 24 distribution and run `npm ci`, `npm run dist`, then `npm run pack:installer`. The wizard packages land in `release-installer/`. For `npm run pack:installer -- --dir`, open the unpacked wizard in that directory. Verify installation and launch of both components in a temporary destination before publishing.
+
 ## Submit a pull request
 
 - Open a focused pull request from your branch against **`main`**. Link the related issue, if any.

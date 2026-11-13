@@ -133,18 +133,18 @@ test('Mac terminal scrolling help explains Control shortcuts and keeps the compl
  assert.deepEqual(appGuideTopics(request),['terminal']);
  const guide=buildAppGuide({request,studio});
  assert.match(guide,/Ctrl\+P\/Ctrl\+N page up\/down/);
- assert.match(guide,/Two-finger trackpad\/wheel scrolling is enabled in full-screen TIM when the terminal forwards mouse reports/);
+ assert.match(guide,/Two-finger trackpad\/wheel scrolling works when the terminal forwards mouse reports/);
  assert.match(guide,/Mac Terminal: View > Allow Mouse Reporting/);
  assert.match(guide,/iTerm2: Profiles > Terminal > Enable mouse reporting and Report mouse wheel events/);
- assert.match(guide,/TIM follows macOS natural scrolling without inversion/);
+ assert.match(guide,/TIM follows macOS natural scrolling/);
  assert.match(guide,/tim --no-mouse leaves selection\/scrollback to the terminal; keyboard scrolling still works/);
  assert.match(guide,/Ctrl\+L returns to latest text and live scrolling/);
  assert.match(guide,/Mac uses Control, not Command/);
  assert.match(guide,/PageUp\/Down and forwarded Option\/Alt\+Up\/Down also page/);
- assert.match(guide,/Earlier chat stays anchored as tokens stream; a line indicator shows position/);
- assert.match(guide,/Chat Up\/Down recall current-session user requests and run-local commands without sending; Enter runs/);
+ assert.match(guide,/Earlier chat stays anchored during streaming; a line indicator shows position/);
+ assert.match(guide,/Chat Up\/Down recall current-session requests and run-local commands without sending; Enter runs/);
  assert.match(guide,/Down past newest restores your draft/);
- assert.match(guide,/Multiline drafts keep line editing until a boundary, then recall whole entries/);
+ assert.match(guide,/Multiline drafts edit until a boundary, then recall whole entries/);
  assert.match(guide,/No new disk history/);assert.match(guide,/Menus\/reviews keep arrow navigation/);
  assert.match(guide,/user-operated terminal commands, not chat tools/);
  assert.match(guide,/"installedModels":10000/);assert.match(guide,/"savedPipelines":10000/);
@@ -155,12 +155,23 @@ test('Mac terminal scrolling help explains Control shortcuts and keeps the compl
 test('CLI recall help distinguishes draft history from output scrolling and never promises automatic execution',()=>{
  const guide=buildAppGuide({request:'How do I rerun earlier commands using Up and Down in the TIM CLI?'});
  assert.deepEqual(appGuideTopics('How do I rerun earlier commands using Up and Down in the TIM CLI?'),['terminal']);
- assert.match(guide,/current-session user requests and run-local commands without sending; Enter runs/);
+ assert.match(guide,/current-session requests and run-local commands without sending; Enter runs/);
  assert.match(guide,/Down past newest restores your draft/);
- assert.match(guide,/Multiline drafts keep line editing until a boundary, then recall whole entries/);
+ assert.match(guide,/Multiline drafts edit until a boundary, then recall whole entries/);
  assert.match(guide,/No new disk history/);
  assert.match(guide,/Ctrl\+P\/Ctrl\+N page up\/down/);assert.match(guide,/Ctrl\+L returns to latest text and live scrolling/);
  assert.match(guide,/Ctrl\+J inserts a newline/);assert.match(guide,/Menus\/reviews keep arrow navigation/);
+ assert.ok(guide.length<=APP_GUIDE_MAX_CHARS);
+});
+
+test('terminal code help explains copying and explicit source/file/command approval without granting desktop chat tools',()=>{
+ const guide=buildAppGuide({request:'How do I copy replies, save Python code and run it in the TIM CLI?',studio:{registry:{models:[],runtimes:{}},pipelines:{definitions:[],runs:[]}}});
+ assert.deepEqual(appGuideTopics('How do I copy replies, save Python code and run it in the TIM CLI?'),['terminal']);
+ for(const text of ['/copy copies the latest completed reply','/copy code copies complete code blocks','/select or F2 pauses display updates and releases mouse reporting','Mac Command+C copies','Esc/F2 resumes; model work continues','/save PATH [--run] [--block N]','/run [PATH] [ARGS...]','Ctrl+S confirms source/file/command once','no overwrite or dependency install','Source is rechecked before launch','user privileges, closed stdin, 300s limit','Esc cancels the owned process','Close Matplotlib windows to finish'])assert.ok(guide.includes(text),text);
+ assert.match(guide,/Explicit save\/run requests open review after generation/);
+ assert.match(guide,/user-operated terminal commands, not chat tools/);
+ assert.match(guide,/cannot click the interface, create\/edit\/run saved pipelines/);
+ assert.match(guide,/Descriptive application help grants no extra tools or permissions/);
  assert.ok(guide.length<=APP_GUIDE_MAX_CHARS);
 });
 
@@ -175,7 +186,7 @@ test('response-length help explains Auto, manual limits, context memory and expl
  assert.match(settings,/Auto does not start continuation requests/);assert.doesNotMatch(settings,/guide remains fixed at 4096/);
  const terminal=buildAppGuide({request:'How do I change the TIM CLI response length?'});
  for(const command of ['/tokens shows response length','/tokens auto','/tokens N','/context N','--max-tokens auto|N --context N'])assert.ok(terminal.includes(command),command);
- assert.match(terminal,/Auto uses remaining context; model\/provider limits still apply/);
- assert.match(terminal,/Larger contexts use more RAM; no automatic continuation/);
+ assert.match(terminal,/\/tokens auto removes TIM cap, uses remaining context/);assert.match(terminal,/Model\/provider limits apply/);
+ assert.match(terminal,/larger contexts use more RAM/);assert.match(terminal,/no automatic continuation/);
  assert.ok(settings.length<=APP_GUIDE_MAX_CHARS);assert.ok(terminal.length<=APP_GUIDE_MAX_CHARS);
 });

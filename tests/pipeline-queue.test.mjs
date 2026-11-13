@@ -58,44 +58,69 @@ async function fixture(t, { budgetBytes = 8 * GiB } = {}) {
 }
 const settled = (studio, id) => until(() => !studio.active && !['queued', 'running'].includes(studio.jobs.find(job => job.id === id)?.status), 'job to settle');
 
-test('pipeline steps and normal chat share one global inference queue without overlap', async t => {
-  const { studio } = await fixture(t);
-  const started = deferred(), release = deferred(), events = []; let active = 0, maxActive = 0;
-  studio.pipelines.executeStep = async (step, context) => {
-    active++; maxActive = Math.max(active, maxActive); events.push(`${step.id}:start`);
-    if (step.id === 'a') { started.resolve(); await gate(context.signal, release.promise); }
-    events.push(`${step.id}:end`); active--; return { text: `Result ${step.id}` };
-  };
-  studio.llama.generate = async (_messages, _settings, signal, token) => { signal.throwIfAborted(); active++; maxActive = Math.max(active, maxActive); events.push('chat'); token('Manual response'); active--; };
-  const saved = await studio.pipelines.save(definition([node('a'), node('b', { dependsOn: ['a'] })]));
-  const run = await studio.runPipeline({ pipelineId: saved.id }); await waitForStart(started, settled(studio, run.id));
-  const manual = await studio.enqueue({ kind: 'chat', modelId: 'local', prompt: 'Manual task' });
-  assert.equal(manual.status, 'queued'); assert.deepEqual(events, ['a:start']);
-  release.resolve(); await settled(studio, manual.id);
-  assert.equal(run.status, 'completed'); assert.equal(manual.status, 'completed'); assert.equal(maxActive, 1);
-  assert.deepEqual(events, ['a:start', 'a:end', 'b:start', 'b:end', 'chat']);
-  assert.equal(studio.jobs.find(job => job.id === run.id).progress, 100);
-});
+for (const role of ['guide', 'specialist']) {
+  test(`pipeline steps and ${role} chat share one global inference queue without overlap`, async t => {
+    const { studio } = await fixture(t);
+    const modelId = role === 'guide' ? 'local' : 'specialist';
+    if (role === 'specialist') studio.registry.models.push({ id: modelId, name: 'Specialist fixture', kind: 'chat', available: true });
+    const selected = role === 'guide' ? studio.orchestrator : studio.llama;
+    const unused = role === 'guide' ? studio.llama : studio.orchestrator;
+    const unusedGenerate = t.mock.method(unused, 'generate', () => assert.fail('Chat used the wrong engine'));
+    const selectedLoad = t.mock.method(selected, 'load');
+    const unusedLoad = t.mock.method(unused, 'load', () => assert.fail('Chat loaded the wrong engine'));
+    const started = deferred(), release = deferred(), events = []; let active = 0, maxActive = 0;
+    studio.pipelines.executeStep = async (step, context) => {
+      active++; maxActive = Math.max(active, maxActive); events.push(`${step.id}:start`);
+      if (step.id === 'a') { started.resolve(); await gate(context.signal, release.promise); }
+      events.push(`${step.id}:end`); active--; return { text: `Result ${step.id}` };
+    };
+    const generate = t.mock.method(selected, 'generate', async (_messages, _settings, signal, token) => { signal.throwIfAborted(); active++; maxActive = Math.max(active, maxActive); events.push('chat'); token('Manual response'); active--; });
+    const saved = await studio.pipelines.save(definition([node('a'), node('b', { dependsOn: ['a'] })]));
+    const run = await studio.runPipeline({ pipelineId: saved.id }); await waitForStart(started, settled(studio, run.id));
+    const manual = await studio.enqueue({ kind: 'chat', modelId, prompt: 'Manual task' });
+    assert.equal(manual.status, 'queued'); assert.deepEqual(events, ['a:start']);
+    release.resolve(); await settled(studio, manual.id);
+    assert.equal(run.status, 'completed'); assert.equal(manual.status, 'completed'); assert.equal(maxActive, 1);
+    assert.deepEqual(events, ['a:start', 'a:end', 'b:start', 'b:end', 'chat']);
+    assert.equal(studio.jobs.find(job => job.id === run.id).progress, 100);
+    assert.equal(generate.mock.callCount(), 1);
+    assert.equal(selectedLoad.mock.callCount(), 1);
+    assert.equal(unusedGenerate.mock.callCount(), 0);
+    assert.equal(unusedLoad.mock.callCount(), 0);
+  });
 
-test('queued pause remains effective while its persistence is pending and another job finishes', async t => {
-  const { studio } = await fixture(t);
-  const manualStarted = deferred(), manualRelease = deferred(), pauseApplied = deferred(), pauseRelease = deferred(); let steps = 0;
-  studio.llama.generate = async (_messages, _settings, signal, token) => { manualStarted.resolve(); await gate(signal, manualRelease.promise); token('Done'); };
-  studio.pipelines.executeStep = async () => { steps++; return { text: 'Done' }; };
-  const manual = await studio.enqueue({ kind: 'chat', modelId: 'local', prompt: 'First' }); await waitForStart(manualStarted, settled(studio, manual.id));
-  const saved = await studio.pipelines.save(definition([node('a')]));
-  const run = await studio.runPipeline({ pipelineId: saved.id }); assert.equal(run.status, 'queued');
-  const originalChanged = studio.pipelines.changed.bind(studio.pipelines);
-  studio.pipelines.changed = async () => { if (run.status === 'paused') { pauseApplied.resolve(); await pauseRelease.promise; } await originalChanged(); };
-  const pausing = studio.pausePipeline(run.id); await waitForStart(pauseApplied, pausing);
-  assert.equal(studio.jobs.find(job => job.id === run.id).status, 'queued');
-  manualRelease.resolve(); await settled(studio, manual.id);
-  assert.equal(steps, 0); assert.equal(run.status, 'paused'); assert.equal(studio.active, null);
-  pauseRelease.resolve(); await pausing; studio.pipelines.changed = originalChanged;
-  assert.equal(studio.jobs.find(job => job.id === run.id).status, 'paused');
-  await studio.resumePipeline(run.id); await settled(studio, run.id);
-  assert.equal(run.status, 'completed'); assert.equal(steps, 1);
-});
+  test(`queued pause remains effective while its persistence is pending and ${role} chat finishes`, async t => {
+    const { studio } = await fixture(t);
+    const modelId = role === 'guide' ? 'local' : 'specialist';
+    if (role === 'specialist') studio.registry.models.push({ id: modelId, name: 'Specialist fixture', kind: 'chat', available: true });
+    const selected = role === 'guide' ? studio.orchestrator : studio.llama;
+    const unused = role === 'guide' ? studio.llama : studio.orchestrator;
+    const unusedGenerate = t.mock.method(unused, 'generate', () => assert.fail('Chat used the wrong engine'));
+    const selectedLoad = t.mock.method(selected, 'load');
+    const unusedLoad = t.mock.method(unused, 'load', () => assert.fail('Chat loaded the wrong engine'));
+    const manualStarted = deferred(), manualRelease = deferred(), pauseApplied = deferred(), pauseRelease = deferred(); let steps = 0;
+    const generate = t.mock.method(selected, 'generate', async (_messages, _settings, signal, token) => { manualStarted.resolve(); await gate(signal, manualRelease.promise); token('Done'); });
+    studio.pipelines.executeStep = async () => { steps++; return { text: 'Done' }; };
+    const manual = await studio.enqueue({ kind: 'chat', modelId, prompt: 'First' }); await waitForStart(manualStarted, settled(studio, manual.id));
+    const saved = await studio.pipelines.save(definition([node('a')]));
+    const run = await studio.runPipeline({ pipelineId: saved.id }); assert.equal(run.status, 'queued');
+    const originalChanged = studio.pipelines.changed.bind(studio.pipelines);
+    studio.pipelines.changed = async () => { if (run.status === 'paused') { pauseApplied.resolve(); await pauseRelease.promise; } await originalChanged(); };
+    const pausing = studio.pausePipeline(run.id); await waitForStart(pauseApplied, pausing);
+    assert.equal(studio.jobs.find(job => job.id === run.id).status, 'queued');
+    manualRelease.resolve(); await settled(studio, manual.id);
+    assert.equal(manual.status, 'completed');
+    assert.equal(steps, 0); assert.equal(run.status, 'paused'); assert.equal(studio.active, null);
+    pauseRelease.resolve(); await pausing; studio.pipelines.changed = originalChanged;
+    assert.equal(studio.jobs.find(job => job.id === run.id).status, 'paused');
+    await studio.resumePipeline(run.id); await settled(studio, run.id);
+    assert.equal(run.status, 'completed'); assert.equal(steps, 1);
+    assert.equal(generate.mock.callCount(), 1);
+    assert.equal(selectedLoad.mock.callCount(), 1);
+    assert.equal(unusedGenerate.mock.callCount(), 0);
+    assert.equal(unusedLoad.mock.callCount(), 0);
+  });
+}
 
 test('active pause finishes one step, then resume keeps completed outputs and the same queue job', async t => {
   const { studio } = await fixture(t);

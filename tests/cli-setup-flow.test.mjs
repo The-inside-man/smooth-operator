@@ -132,7 +132,7 @@ test('startSetup opens the catalog directly and requires separate model review a
   assert.equal(app.calls.filter(call=>call.route==='setup').length,0);
   await app.key('\r');await app.wait(()=>app.calls.some(call=>call.route==='setup'),'startSetup explicit review confirmation');
   assert.equal(app.calls.filter(call=>call.route==='setup').length,1);assert.equal(app.calls.filter(call=>call.route==='jobs').length,0);
-  await app.push(ready());await app.wait(()=>app.selections.length===1,'startSetup completion');
+  await app.push(ready());await app.wait(()=>app.selections.length===1&&app.output.includes('Local model ready: '+target.name)&&app.output.includes(request),'startSetup completion and restored composer frame');
   assert.ok(app.output.includes(request));assert.equal(app.calls.filter(call=>call.route==='jobs').length,0);
  }finally{await app.close();}
 });
@@ -172,7 +172,7 @@ for(const mode of ['chat','code'])test(`choosing a download in /models preserves
    await app.key('\x1b');await app.key('/mode code');await app.key('\r');
    await app.key(request);assert.match(await app.key('\r'),/TIM \/ MODELS/);
   }
-  assert.match(app.output,/15 chat models \/ 1 available \/ 14 downloadable/);assert.match(app.output,/Qwen3 4B.*download/);
+  assert.ok(app.output.includes(`${catalog.length} chat models / 1 available / ${catalog.length-1} downloadable`));assert.match(app.output,/Qwen3 4B.*download/);
   await app.key(targetNumber);const review=await app.key('\r');assert.match(review,/REVIEW \/ Qwen3 4B/);
   assert.match(review,/Enter start setup/);assert.doesNotMatch(review,/Number \+ Enter review/,'download selection opens its review directly');
   assert.equal(app.calls.filter(call=>call.route==='setup').length,0);assert.equal(app.calls.filter(call=>call.route==='jobs').length,0);

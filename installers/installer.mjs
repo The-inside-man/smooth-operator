@@ -39,7 +39,17 @@ export async function install(argv){const opts={};for(let i=0;i<argv.length;i++)
  const shell=old?.shell||opts.shell||path.basename(process.env.SHELL||'unknown');const id=old?.id||crypto.randomUUID(),profiles=win?[]:old?.profiles||profilePlans(home,shell,bin,id,sandbox);
  if(old&&!win){const expected=profilePlans(home,shell,bin,id,sandbox);if(profiles.length!==expected.length||profiles.some(p=>!expected.some(e=>e.file===p.file&&e.block===p.block)))throw new Error('Managed profile metadata no longer matches this user/shell; refusing modification.');}
  for(const p of profiles){if(sandbox&&!within(sandbox,path.resolve(p.file)))throw new Error('Profile outside sandbox');writable(p.file);if(fs.existsSync(p.file)&&fs.lstatSync(p.file).isSymbolicLink())throw new Error('Profile symlink requires manual setup: '+p.file);if(old&&(!fs.existsSync(p.file)||!fs.readFileSync(p.file,'utf8').includes(p.block)))throw new Error('Managed PATH block changed or missing: '+p.file+'. Resolve it before updating/uninstalling.');}
- let pkg,expected,npm;if(!opts.uninstall&&!opts.rollback){pkg=path.resolve(opts.package||path.join(here,'tim-studio-cli-0.1.0.tgz'));if(!fs.existsSync(pkg)||!fs.statSync(pkg).isFile())throw new Error('Supply a local TIM CLI .tgz using --package.');const manifest=path.join(here,'tim-package.json');const bundled=fs.existsSync(manifest)?JSON.parse(fs.readFileSync(manifest,'utf8')):null;expected=opts.sha256||(bundled?.filename===path.basename(pkg)?bundled.sha256:null);if(!/^[a-fA-F0-9]{64}$/.test(expected||'')||hash(fs.readFileSync(pkg))!==expected.toLowerCase())throw new Error('Package checksum missing or mismatched. Supply --sha256 from a trusted distribution.');npm=npmEntry();}
+ let pkg,expected,npm;
+ if(!opts.uninstall&&!opts.rollback){
+  const manifest=path.join(here,'tim-package.json');
+  const bundled=fs.existsSync(manifest)?JSON.parse(fs.readFileSync(manifest,'utf8')):null;
+  if(!opts.package&&!/^tim-studio-cli-[\w.+-]+\.tgz$/.test(bundled?.filename||''))throw new Error('Supply a local TIM CLI .tgz using --package, or keep it beside the installer and its manifest.');
+  pkg=path.resolve(opts.package||path.join(here,bundled.filename));
+  if(!fs.existsSync(pkg)||!fs.statSync(pkg).isFile())throw new Error('Supply a local TIM CLI .tgz using --package.');
+  expected=opts.sha256||(bundled?.filename===path.basename(pkg)?bundled.sha256:null);
+  if(!/^[a-fA-F0-9]{64}$/.test(expected||'')||hash(fs.readFileSync(pkg))!==expected.toLowerCase())throw new Error('Package checksum missing or mismatched. Supply --sha256 from a trusted distribution.');
+  npm=npmEntry();
+ }
  const oldUserPath=win?windowsPath(sandbox):null;fs.mkdirSync(root,{recursive:true});const lock=path.join(root,'.install.lock');const fd=fs.openSync(lock,'wx');let release,changedPath=false,committed=false;const snapshots=new Map();
  const remember=file=>{if(!snapshots.has(file))snapshots.set(file,fs.existsSync(file)?fs.readFileSync(file):null);};
  const write=(file,data)=>{remember(file);fs.mkdirSync(path.dirname(file),{recursive:true});atomic(file,data);};

@@ -224,6 +224,18 @@ try {
   // Render the actual curated image metadata as well as the focused fixture.
   // No weights are fetched and this does not claim inference was run.
   const { catalogModels } = await import('../server/catalog.mjs');
+  const gemmaCatalog = catalogModels.filter(entry => entry.id.startsWith('gemma-4-')).map(({ files, ...entry }) => ({ ...entry, bundleFiles: files.length }));
+  state.catalog = gemmaCatalog; state.models = []; state.downloads = [];
+  await push();
+  await page.getByRole('tab', { name: 'All models', exact: true }).click();
+  await page.getByLabel('Model category', { exact: true }).selectOption('chat');
+  await page.getByLabel('Search models', { exact: true }).fill('Gemma 4');
+  assert.equal(await page.locator('.catalog-card').count(), 5);
+  const gemma = page.locator('.catalog-card').filter({ has: page.getByRole('heading', { name: 'Gemma 4 E4B', exact: true }) });
+  await gemma.getByText('Requires a Gemma 4-compatible llama.cpp chat engine.', { exact: true }).waitFor();
+  await gemma.getByRole('button', { name: 'Download model', exact: true }).click();
+  await gemma.getByRole('progressbar').waitFor();
+  assert.deepEqual(calls.at(-1), { endpoint: 'models/download', data: { id: 'gemma-4-e4b' } });
   const imageCatalog = catalogModels.filter(entry => entry.kind === 'image').map(({ files, profile, ...entry }) => ({ ...entry, bundleFiles: files.length, inputMode: profile.inputMode, requiresReference: !!profile.requiresReference }));
   state.catalog = imageCatalog; state.models = []; state.downloads = [];
   state.memory = { ...state.memory, total: 64 * GB, free: 40 * GB, totalBytes: 64 * GB, availableBytes: 40 * GB, usedBytes: 24 * GB, reserveBytes: 6.4 * GB, modelBudgetBytes: 33.6 * GB, availableSource: 'os' };
